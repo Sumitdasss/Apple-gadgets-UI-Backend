@@ -10,11 +10,13 @@ import { connectDB } from './config/db.js';
 const app = express();
 app.use(
   cors({
-    origin: "http://localhost:3000",
+    origin: [
+      "http://localhost:3000",
+      "https://apple-gadgets-ui.vercel.app",
+    ],
     credentials: true,
   })
 );
-
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));

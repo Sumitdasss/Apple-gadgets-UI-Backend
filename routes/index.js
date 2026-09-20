@@ -1,9 +1,10 @@
 import express from 'express';
-import { addProduct } from '../Controller/addproduct.js';
+import { addProduct, getAllProduct } from '../Controller/addproduct.js';
 import upload from '../midddlewere/upload.js';
 import { getAllCategories, getCategoryTree,createCategory,getAllChildCategories,createChildCategory,getRootCategories,getChildCategories,getCategoryById,updateCategory,deleteCategory } from '../Controller/Catgorihandelar.js';
 const router = express.Router();
-router.post('/addproduct',upload.single("image"),addProduct);
+router.post('/addproduct',upload.array("images", 10),addProduct);
+router.get('/getallProduct',getAllProduct);
 
 router.post("/creatcatagori", createCategory);
 router.post("/addchaildcatagory", createChildCategory);

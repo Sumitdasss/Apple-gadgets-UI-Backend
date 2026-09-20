@@ -1,9 +1,7 @@
-
 import mongoose from "mongoose";
 
 const productSchema = new mongoose.Schema(
   {
-
     name: {
       type: String,
       required: true,
@@ -14,7 +12,6 @@ const productSchema = new mongoose.Schema(
       type: String,
       required: true,
       unique: true,
-      lowercase: true,
       trim: true,
     },
 
@@ -25,59 +22,39 @@ const productSchema = new mongoose.Schema(
 
     shortDescription: {
       type: String,
+      default: "",
     },
 
-    // ==========================================
-    // CATEGORY
-    // ==========================================
-   category: {
-  type: mongoose.Schema.Types.ObjectId,
-  ref: "Category",
-  required: true,
-},
+    category: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Category",
+      required: true,
+    },
 
-subCategory: {
-  type: mongoose.Schema.Types.ObjectId,
-  ref: "Category",
-  default: null,
-},
+    subCategory: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Category",
+      default: null,
+    },
 
-childCategory: {
-  type: mongoose.Schema.Types.ObjectId,
-  ref: "Category",
-  default: null,
-},
-subChildCategory: {
-  type: mongoose.Schema.Types.ObjectId,
-  ref: "Category",
-  default: null,
-},
+    childCategory: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Category",
+      default: null,
+    },
 
-    // ==========================================
-    // CATEGORY PATH
-    // Example:
-    // Mobile Phone
-    // → iPhone
-    // → iPhone 18 Series
-    // ==========================================
-    categoryPath: [
-      {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "Category",
-      },
-    ],
+    subChildCategory: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Category",
+      default: null,
+    },
 
-    // ==========================================
-    // BRAND
-    // ==========================================
     brand: {
       type: String,
+      default: "",
       trim: true,
     },
 
-    // ==========================================
-    // PRICE
-    // ==========================================
     price: {
       type: Number,
       required: true,
@@ -86,85 +63,82 @@ subChildCategory: {
 
     discountPrice: {
       type: Number,
-      min: 0,
       default: null,
+      min: 0,
     },
 
     discountPercentage: {
       type: Number,
       default: 0,
-      min: 0,
-      max: 100,
     },
 
-    // ==========================================
-    // INVENTORY
-    // ==========================================
     stock: {
       type: Number,
       required: true,
-      default: 0,
       min: 0,
     },
 
     sku: {
       type: String,
-      unique: true,
+      default: "",
       trim: true,
     },
 
-    // ==========================================
-    // IMAGES
-    // ==========================================
-    images: [
-      {
-        type: String,
-      },
-    ],
-
-    thumbnail: {
-      type: String,
-    },
-
-    // ==========================================
+    // =========================
     // COLORS
-    // ==========================================
+    // =========================
     colors: [
       {
-        name: String,
-        code: String,
+        name: {
+          type: String,
+          trim: true,
+        },
+
+        code: {
+          type: String,
+          trim: true,
+        },
       },
     ],
 
-    // ==========================================
+    // =========================
     // SIZES
-    // ==========================================
-    sizes: [
-      {
-        type: String,
-      },
-    ],
+    // =========================
+    sizes: {
+      type: [String],
+      default: [],
+    },
 
-    // ==========================================
+    // =========================
+    // RAM / MEMORY
+    // =========================
+    ram: {
+      type: [String],
+      default: [],
+    },
+
+    // =========================
     // SPECIFICATIONS
-    // ==========================================
+    // =========================
     specifications: [
       {
         key: {
           type: String,
+          required: true,
           trim: true,
         },
 
         value: {
           type: String,
+          required: true,
           trim: true,
         },
       },
     ],
 
-    // ==========================================
+    // =========================
     // RATING
-    // ==========================================
+    // =========================
     rating: {
       type: Number,
       default: 0,
@@ -172,14 +146,9 @@ subChildCategory: {
       max: 5,
     },
 
-    numReviews: {
-      type: Number,
-      default: 0,
-    },
-
-    // ==========================================
+    // =========================
     // STATUS
-    // ==========================================
+    // =========================
     isActive: {
       type: Boolean,
       default: true,
@@ -190,25 +159,35 @@ subChildCategory: {
       default: false,
     },
 
-isNewProduct: {
-  type: Boolean,
-  default: false,
-},
+    isNew: {
+      type: Boolean,
+      default: false,
+    },
 
     isBestSeller: {
       type: Boolean,
       default: false,
     },
 
-    // ==========================================
+    // =========================
     // SEO
-    // ==========================================
+    // =========================
     metaTitle: {
       type: String,
+      default: "",
     },
 
     metaDescription: {
       type: String,
+      default: "",
+    },
+
+    // =========================
+    // IMAGES
+    // =========================
+    images: {
+      type: [String],
+      default: [],
     },
   },
   {
@@ -216,9 +195,8 @@ isNewProduct: {
   }
 );
 
-const Product = mongoose.model(
-  "Product",
-  productSchema
-);
+const Product =
+  mongoose.models.Product ||
+  mongoose.model("Product", productSchema);
 
 export default Product;

@@ -106,7 +106,28 @@ const productSchema = new mongoose.Schema(
     },
   },
 ],
+variants: [
+  {
+    color: {
+      name: String,
+      code: String,
+      image: String,
+    },
 
+    ram: String,
+
+    storage: String,
+
+    stock: {
+      type: Number,
+      default: 0,
+    },
+
+    price: Number,
+
+    sku: String,
+  },
+],
     // =========================
     // SIZES
     // =========================

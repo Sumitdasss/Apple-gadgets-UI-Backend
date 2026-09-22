@@ -21,6 +21,8 @@ export const addProduct = async (req, res) => {
       childCategory,
       subChildCategory,
 
+      variants,
+
       brand,
 
       price,
@@ -93,6 +95,33 @@ export const addProduct = async (req, res) => {
     }
 
     // ========================================
+    // HELPER: PARSE JSON
+    // ========================================
+
+    const parseJSON = (value, fallback = []) => {
+      if (
+        value === undefined ||
+        value === null ||
+        value === ""
+      ) {
+        return fallback;
+      }
+
+      // যদি already array/object হয়
+      if (typeof value !== "string") {
+        return value;
+      }
+
+      try {
+        return JSON.parse(value);
+      } catch (error) {
+        throw new Error(
+          `Invalid JSON data: ${error.message}`
+        );
+      }
+    };
+
+    // ========================================
     // PARSE JSON FIELDS
     // ========================================
 
@@ -100,53 +129,34 @@ export const addProduct = async (req, res) => {
     let parsedSizes = [];
     let parsedRam = [];
     let parsedSpecifications = [];
+    let parsedVariants = [];
 
     try {
-      parsedColors = colors
-        ? JSON.parse(colors)
-        : [];
+      parsedColors = parseJSON(colors, []);
+      parsedSizes = parseJSON(sizes, []);
+      parsedRam = parseJSON(ram, []);
+      parsedSpecifications = parseJSON(
+        specifications,
+        []
+      );
+      parsedVariants = parseJSON(
+        variants,
+        []
+      );
     } catch (error) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid colors JSON",
-      });
-    }
+      console.error(
+        "JSON PARSE ERROR:",
+        error
+      );
 
-    try {
-      parsedSizes = sizes
-        ? JSON.parse(sizes)
-        : [];
-    } catch (error) {
       return res.status(400).json({
         success: false,
-        message: "Invalid sizes JSON",
-      });
-    }
-
-    try {
-      parsedRam = ram
-        ? JSON.parse(ram)
-        : [];
-    } catch (error) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid RAM JSON",
-      });
-    }
-
-    try {
-      parsedSpecifications = specifications
-        ? JSON.parse(specifications)
-        : [];
-    } catch (error) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid specifications JSON",
+        message: error.message,
       });
     }
 
     // ========================================
-    // VALIDATE ARRAYS
+    // VALIDATE JSON ARRAYS
     // ========================================
 
     if (!Array.isArray(parsedColors)) {
@@ -173,34 +183,126 @@ export const addProduct = async (req, res) => {
     if (!Array.isArray(parsedSpecifications)) {
       return res.status(400).json({
         success: false,
-        message: "Specifications must be an array",
+        message:
+          "Specifications must be an array",
       });
+    }
+
+    if (!Array.isArray(parsedVariants)) {
+      return res.status(400).json({
+        success: false,
+        message: "Variants must be an array",
+      });
+    }
+
+    // ========================================
+    // DEBUG VARIANTS
+    // ========================================
+
+    console.log(
+      "PARSED VARIANTS:",
+      parsedVariants
+    );
+
+    // ========================================
+    // VALIDATE VARIANTS
+    // ========================================
+
+    for (const variant of parsedVariants) {
+      if (!variant || typeof variant !== "object") {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Each variant must be an object",
+        });
+      }
+
+      if (
+        variant.stock !== undefined &&
+        variant.stock !== ""
+      ) {
+        variant.stock = Number(
+          variant.stock
+        );
+      }
+
+      if (
+        variant.price !== undefined &&
+        variant.price !== ""
+      ) {
+        variant.price = Number(
+          variant.price
+        );
+      }
+
+      if (
+        variant.ram !== undefined &&
+        variant.ram !== null
+      ) {
+        variant.ram = String(
+          variant.ram
+        ).trim();
+      }
+
+      if (
+        variant.storage !== undefined &&
+        variant.storage !== null
+      ) {
+        variant.storage = String(
+          variant.storage
+        ).trim();
+      }
+
+      if (
+        variant.sku !== undefined &&
+        variant.sku !== null
+      ) {
+        variant.sku = String(
+          variant.sku
+        ).trim();
+      }
+
+      // Color normalize
+      if (
+        variant.color &&
+        typeof variant.color === "object"
+      ) {
+        variant.color = {
+          name:
+            variant.color.name || "",
+          code:
+            variant.color.code ||
+            "#000000",
+        };
+      }
     }
 
     // ========================================
     // CHECK DUPLICATE SLUG
     // ========================================
 
-    const existingProduct = await Product.findOne({
-      slug: slug.trim(),
-    });
+    const existingProduct =
+      await Product.findOne({
+        slug: slug.trim(),
+      });
 
     if (existingProduct) {
       return res.status(400).json({
         success: false,
-        message: `Product with slug "${slug}" already exists`,
+        message:
+          `Product with slug "${slug}" already exists`,
       });
     }
 
     // ========================================
-    // GET NORMAL PRODUCT IMAGES
+    // GET PRODUCT IMAGE FILES
     // ========================================
 
     const productImageFiles =
       req.files?.images || [];
 
     // ========================================
-    // GET COLOR IMAGES
+    // GET COLOR IMAGE FILES
     // ========================================
 
     const colorImageFiles =
@@ -239,9 +341,6 @@ export const addProduct = async (req, res) => {
 
     // ========================================
     // COLOR IMAGE URLS
-    //
-    // IMPORTANT:
-    // colorImages order must match colors order
     // ========================================
 
     const uploadedColorImages =
@@ -250,18 +349,22 @@ export const addProduct = async (req, res) => {
       );
 
     // ========================================
-    // ADD COLOR IMAGE URL
+    // FINAL COLORS
     // ========================================
 
-    const finalColors = parsedColors.map(
-      (color, index) => ({
-        name: color.name || "",
-        code: color.code || "#000000",
+    const finalColors =
+      parsedColors.map(
+        (color, index) => ({
+          name: color?.name || "",
+          code:
+            color?.code || "#000000",
 
-        image:
-          uploadedColorImages[index] || "",
-      })
-    );
+          image:
+            uploadedColorImages[index] ||
+            color?.image ||
+            "",
+        })
+      );
 
     console.log(
       "FINAL COLORS:",
@@ -274,11 +377,45 @@ export const addProduct = async (req, res) => {
 
     const productPrice = Number(price);
 
+    if (
+      Number.isNaN(productPrice) ||
+      productPrice < 0
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid product price",
+      });
+    }
+
+    // ========================================
+    // DISCOUNT PRICE
+    // ========================================
+
     const productDiscountPrice =
-      discountPrice &&
+      discountPrice !== undefined &&
       discountPrice !== ""
         ? Number(discountPrice)
         : null;
+
+    if (
+      productDiscountPrice !== null &&
+      (
+        Number.isNaN(
+          productDiscountPrice
+        ) ||
+        productDiscountPrice < 0
+      )
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Invalid discount price",
+      });
+    }
+
+    // ========================================
+    // CALCULATE DISCOUNT %
+    // ========================================
 
     let calculatedDiscountPercentage = 0;
 
@@ -288,105 +425,199 @@ export const addProduct = async (req, res) => {
       productDiscountPrice < productPrice
     ) {
       calculatedDiscountPercentage =
-        ((productPrice -
-          productDiscountPrice) /
-          productPrice) *
-        100;
+        (
+          (productPrice -
+            productDiscountPrice) /
+          productPrice
+        ) * 100;
     }
+
+    // ========================================
+    // FINAL DISCOUNT %
+    // ========================================
+
+    const finalDiscountPercentage =
+      discountPercentage !== undefined &&
+      discountPercentage !== ""
+        ? Number(discountPercentage)
+        : Number(
+            calculatedDiscountPercentage.toFixed(
+              2
+            )
+          );
+
+    // ========================================
+    // STOCK
+    // ========================================
+
+    const productStock = Number(stock);
+
+    if (
+      Number.isNaN(productStock) ||
+      productStock < 0
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid stock",
+      });
+    }
+
+    // ========================================
+    // RATING
+    // ========================================
+
+    const productRating =
+      rating !== undefined &&
+      rating !== ""
+        ? Number(rating)
+        : 0;
 
     // ========================================
     // CREATE PRODUCT
     // ========================================
 
-    const product = await Product.create({
-      name: name.trim(),
+    const product =
+      await Product.create({
+        name: name.trim(),
 
-      slug: slug.trim(),
+        slug: slug.trim(),
 
-      description: description.trim(),
+        description:
+          description.trim(),
 
-      shortDescription:
-        shortDescription?.trim() || "",
+        shortDescription:
+          shortDescription?.trim() || "",
 
-      category,
+        // ====================================
+        // CATEGORY
+        // ====================================
 
-      subCategory:
-        subCategory || null,
+        category,
 
-      childCategory:
-        childCategory || null,
+        subCategory:
+          subCategory || null,
 
-      subChildCategory:
-        subChildCategory || null,
+        childCategory:
+          childCategory || null,
 
-      brand:
-        brand?.trim() || "",
+        subChildCategory:
+          subChildCategory || null,
 
-      price: productPrice,
+        // ====================================
+        // BRAND
+        // ====================================
 
-      discountPrice:
-        productDiscountPrice,
+        brand:
+          brand?.trim() || "",
 
-      discountPercentage:
-        discountPercentage !== undefined &&
-        discountPercentage !== ""
-          ? Number(discountPercentage)
-          : Number(
-              calculatedDiscountPercentage.toFixed(
-                2
-              )
-            ),
+        // ====================================
+        // PRICE
+        // ====================================
 
-      stock: Number(stock),
+        price: productPrice,
 
-      sku:
-        sku?.trim() || "",
+        discountPrice:
+          productDiscountPrice,
 
-      // ⭐ COLOR WITH IMAGE
-      colors: finalColors,
+        discountPercentage:
+          finalDiscountPercentage,
 
-      sizes: parsedSizes,
+        // ====================================
+        // STOCK
+        // ====================================
 
-      ram: parsedRam,
+        stock: productStock,
 
-      specifications:
-        parsedSpecifications,
+        // ====================================
+        // SKU
+        // ====================================
 
-      rating:
-        rating !== undefined &&
-        rating !== ""
-          ? Number(rating)
-          : 0,
+        sku:
+          sku?.trim() || "",
 
-      isActive:
-        isActive === "true" ||
-        isActive === true,
+        // ====================================
+        // COLORS
+        // ====================================
 
-      isFeatured:
-        isFeatured === "true" ||
-        isFeatured === true,
+        colors: finalColors,
 
-      isNew:
-        isNew === "true" ||
-        isNew === true,
+        // ====================================
+        // SIZES
+        // ====================================
 
-      isBestSeller:
-        isBestSeller === "true" ||
-        isBestSeller === true,
+        sizes: parsedSizes,
 
-      metaTitle:
-        metaTitle?.trim() || "",
+        // ====================================
+        // RAM
+        // ====================================
 
-      metaDescription:
-        metaDescription?.trim() || "",
+        ram: parsedRam,
 
-      // ⭐ NORMAL PRODUCT IMAGES
-      images: uploadedImages,
-    });
+        // ====================================
+        // SPECIFICATIONS
+        // ====================================
+
+        specifications:
+          parsedSpecifications,
+
+        // ====================================
+        // VARIANTS
+        // ====================================
+
+        variants:
+          parsedVariants,
+
+        // ====================================
+        // RATING
+        // ====================================
+
+        rating: productRating,
+
+        // ====================================
+        // STATUS
+        // ====================================
+
+        isActive:
+          isActive === "true" ||
+          isActive === true,
+
+        isFeatured:
+          isFeatured === "true" ||
+          isFeatured === true,
+
+        isNew:
+          isNew === "true" ||
+          isNew === true,
+
+        isBestSeller:
+          isBestSeller === "true" ||
+          isBestSeller === true,
+
+        // ====================================
+        // SEO
+        // ====================================
+
+        metaTitle:
+          metaTitle?.trim() || "",
+
+        metaDescription:
+          metaDescription?.trim() || "",
+
+        // ====================================
+        // PRODUCT IMAGES
+        // ====================================
+
+        images: uploadedImages,
+      });
 
     // ========================================
     // SUCCESS
     // ========================================
+
+    console.log(
+      "PRODUCT CREATED:",
+      product._id
+    );
 
     return res.status(201).json({
       success: true,
@@ -396,7 +627,6 @@ export const addProduct = async (req, res) => {
 
       product,
     });
-
   } catch (error) {
     console.error(
       "================================="
@@ -413,7 +643,7 @@ export const addProduct = async (req, res) => {
     );
 
     // ========================================
-    // DUPLICATE KEY
+    // DUPLICATE KEY ERROR
     // ========================================
 
     if (error.code === 11000) {
@@ -428,6 +658,47 @@ export const addProduct = async (req, res) => {
           `${duplicateField} already exists`,
       });
     }
+
+    // ========================================
+    // VALIDATION ERROR
+    // ========================================
+
+    if (
+      error.name ===
+      "ValidationError"
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Product validation failed",
+        errors: Object.values(
+          error.errors
+        ).map(
+          (err) => err.message
+        ),
+      });
+    }
+
+    // ========================================
+    // CAST ERROR
+    // ========================================
+
+    if (
+      error.name ===
+      "CastError"
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          `Invalid value for ${error.path}`,
+        error:
+          error.message,
+      });
+    }
+
+    // ========================================
+    // GENERAL ERROR
+    // ========================================
 
     return res.status(500).json({
       success: false,

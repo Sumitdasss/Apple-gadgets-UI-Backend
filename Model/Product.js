@@ -88,18 +88,24 @@ const productSchema = new mongoose.Schema(
     // COLORS
     // =========================
     colors: [
-      {
-        name: {
-          type: String,
-          trim: true,
-        },
+  {
+    name: {
+      type: String,
+      trim: true,
+    },
 
-        code: {
-          type: String,
-          trim: true,
-        },
-      },
-    ],
+    code: {
+      type: String,
+      trim: true,
+    },
+
+    image: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+  },
+],
 
     // =========================
     // SIZES

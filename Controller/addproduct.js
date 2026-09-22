@@ -102,7 +102,9 @@ export const addProduct = async (req, res) => {
     let parsedSpecifications = [];
 
     try {
-      parsedColors = colors ? JSON.parse(colors) : [];
+      parsedColors = colors
+        ? JSON.parse(colors)
+        : [];
     } catch (error) {
       return res.status(400).json({
         success: false,
@@ -111,7 +113,9 @@ export const addProduct = async (req, res) => {
     }
 
     try {
-      parsedSizes = sizes ? JSON.parse(sizes) : [];
+      parsedSizes = sizes
+        ? JSON.parse(sizes)
+        : [];
     } catch (error) {
       return res.status(400).json({
         success: false,
@@ -120,7 +124,9 @@ export const addProduct = async (req, res) => {
     }
 
     try {
-      parsedRam = ram ? JSON.parse(ram) : [];
+      parsedRam = ram
+        ? JSON.parse(ram)
+        : [];
     } catch (error) {
       return res.status(400).json({
         success: false,
@@ -140,8 +146,22 @@ export const addProduct = async (req, res) => {
     }
 
     // ========================================
-    // VALIDATE RAM
+    // VALIDATE ARRAYS
     // ========================================
+
+    if (!Array.isArray(parsedColors)) {
+      return res.status(400).json({
+        success: false,
+        message: "Colors must be an array",
+      });
+    }
+
+    if (!Array.isArray(parsedSizes)) {
+      return res.status(400).json({
+        success: false,
+        message: "Sizes must be an array",
+      });
+    }
 
     if (!Array.isArray(parsedRam)) {
       return res.status(400).json({
@@ -149,10 +169,6 @@ export const addProduct = async (req, res) => {
         message: "RAM must be an array",
       });
     }
-
-    // ========================================
-    // VALIDATE SPECIFICATIONS
-    // ========================================
 
     if (!Array.isArray(parsedSpecifications)) {
       return res.status(400).json({
@@ -177,27 +193,80 @@ export const addProduct = async (req, res) => {
     }
 
     // ========================================
-    // IMAGE UPLOAD
+    // GET NORMAL PRODUCT IMAGES
     // ========================================
 
-    const uploadedImages = [];
-
-    if (req.files && req.files.length > 0) {
-      for (const file of req.files) {
-        uploadedImages.push(file.path);
-      }
-    }
+    const productImageFiles =
+      req.files?.images || [];
 
     // ========================================
-    // IMAGE REQUIRED
+    // GET COLOR IMAGES
+    // ========================================
+
+    const colorImageFiles =
+      req.files?.colorImages || [];
+
+    console.log(
+      "PRODUCT IMAGE COUNT:",
+      productImageFiles.length
+    );
+
+    console.log(
+      "COLOR IMAGE COUNT:",
+      colorImageFiles.length
+    );
+
+    // ========================================
+    // PRODUCT IMAGE URLS
+    // ========================================
+
+    const uploadedImages =
+      productImageFiles.map(
+        (file) => file.path
+      );
+
+    // ========================================
+    // PRODUCT IMAGE REQUIRED
     // ========================================
 
     if (uploadedImages.length === 0) {
       return res.status(400).json({
         success: false,
-        message: "At least one product image is required",
+        message:
+          "At least one product image is required",
       });
     }
+
+    // ========================================
+    // COLOR IMAGE URLS
+    //
+    // IMPORTANT:
+    // colorImages order must match colors order
+    // ========================================
+
+    const uploadedColorImages =
+      colorImageFiles.map(
+        (file) => file.path
+      );
+
+    // ========================================
+    // ADD COLOR IMAGE URL
+    // ========================================
+
+    const finalColors = parsedColors.map(
+      (color, index) => ({
+        name: color.name || "",
+        code: color.code || "#000000",
+
+        image:
+          uploadedColorImages[index] || "",
+      })
+    );
+
+    console.log(
+      "FINAL COLORS:",
+      finalColors
+    );
 
     // ========================================
     // PRICE
@@ -206,7 +275,8 @@ export const addProduct = async (req, res) => {
     const productPrice = Number(price);
 
     const productDiscountPrice =
-      discountPrice && discountPrice !== ""
+      discountPrice &&
+      discountPrice !== ""
         ? Number(discountPrice)
         : null;
 
@@ -218,7 +288,8 @@ export const addProduct = async (req, res) => {
       productDiscountPrice < productPrice
     ) {
       calculatedDiscountPercentage =
-        ((productPrice - productDiscountPrice) /
+        ((productPrice -
+          productDiscountPrice) /
           productPrice) *
         100;
     }
@@ -261,7 +332,9 @@ export const addProduct = async (req, res) => {
         discountPercentage !== ""
           ? Number(discountPercentage)
           : Number(
-              calculatedDiscountPercentage.toFixed(2)
+              calculatedDiscountPercentage.toFixed(
+                2
+              )
             ),
 
       stock: Number(stock),
@@ -269,15 +342,15 @@ export const addProduct = async (req, res) => {
       sku:
         sku?.trim() || "",
 
-      colors: parsedColors,
+      // ⭐ COLOR WITH IMAGE
+      colors: finalColors,
 
       sizes: parsedSizes,
 
-      // ⭐ RAM ARRAY
       ram: parsedRam,
 
-      // ⭐ SPECIFICATION ARRAY
-      specifications: parsedSpecifications,
+      specifications:
+        parsedSpecifications,
 
       rating:
         rating !== undefined &&
@@ -307,6 +380,7 @@ export const addProduct = async (req, res) => {
       metaDescription:
         metaDescription?.trim() || "",
 
+      // ⭐ NORMAL PRODUCT IMAGES
       images: uploadedImages,
     });
 
@@ -316,10 +390,13 @@ export const addProduct = async (req, res) => {
 
     return res.status(201).json({
       success: true,
-      message: "Product added successfully",
+
+      message:
+        "Product added successfully",
 
       product,
     });
+
   } catch (error) {
     console.error(
       "================================="
@@ -341,16 +418,20 @@ export const addProduct = async (req, res) => {
 
     if (error.code === 11000) {
       const duplicateField =
-        Object.keys(error.keyPattern || {})[0];
+        Object.keys(
+          error.keyPattern || {}
+        )[0];
 
       return res.status(400).json({
         success: false,
-        message: `${duplicateField} already exists`,
+        message:
+          `${duplicateField} already exists`,
       });
     }
 
     return res.status(500).json({
       success: false,
+
       message:
         error.message ||
         "Failed to add product",

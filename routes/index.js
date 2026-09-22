@@ -3,7 +3,16 @@ import { addProduct, getAllProduct } from '../Controller/addproduct.js';
 import upload from '../midddlewere/upload.js';
 import { getAllCategories, getCategoryTree,createCategory,getAllChildCategories,createChildCategory,getRootCategories,getChildCategories,getCategoryById,updateCategory,deleteCategory } from '../Controller/Catgorihandelar.js';
 const router = express.Router();
-router.post('/addproduct',upload.array("images", 10),addProduct);
+router.post('/addproduct',upload.fields([
+  {
+    name: "images",
+    maxCount: 10,
+  },
+  {
+    name: "colorImages",
+    maxCount: 20,
+  },
+]),addProduct);
 router.get('/getallProduct',getAllProduct);
 
 router.post("/creatcatagori", createCategory);

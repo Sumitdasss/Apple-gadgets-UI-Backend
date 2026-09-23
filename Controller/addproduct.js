@@ -52,47 +52,32 @@ export const addProduct = async (req, res) => {
     // REQUIRED VALIDATION
     // ========================================
 
-    if (!name?.trim()) {
-      return res.status(400).json({
-        success: false,
-        message: "Product name is required",
-      });
-    }
+    // ========================================
+// REQUIRED FIELDS
+// Only these 4 fields are required
+// ========================================
 
-    if (!slug?.trim()) {
-      return res.status(400).json({
-        success: false,
-        message: "Slug is required",
-      });
-    }
+if (!name?.trim()) {
+  return res.status(400).json({
+    success: false,
+    message: "Product name is required",
+  });
+}
 
-    if (!description?.trim()) {
-      return res.status(400).json({
-        success: false,
-        message: "Description is required",
-      });
-    }
+if (price === undefined || price === "") {
+  return res.status(400).json({
+    success: false,
+    message: "Price is required",
+  });
+}
 
-    if (!category) {
-      return res.status(400).json({
-        success: false,
-        message: "Category is required",
-      });
-    }
+if (stock === undefined || stock === "") {
+  return res.status(400).json({
+    success: false,
+    message: "Stock is required",
+  });
+}
 
-    if (price === undefined || price === "") {
-      return res.status(400).json({
-        success: false,
-        message: "Price is required",
-      });
-    }
-
-    if (stock === undefined || stock === "") {
-      return res.status(400).json({
-        success: false,
-        message: "Stock is required",
-      });
-    }
 
     // ========================================
     // HELPER: PARSE JSON

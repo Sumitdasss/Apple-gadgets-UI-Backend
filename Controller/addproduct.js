@@ -824,22 +824,20 @@ export const getAllProduct = async (req, res) => {
     if (category.trim()) {
       const slug = category.trim().toLowerCase();
 
-      // -----------------------------------------------
-      // Find requested category
-      // -----------------------------------------------
+      // =================================================
+      // FIND CATEGORY
+      // =================================================
 
       const categoryData = await Category.findOne({
         slug,
         isActive: true,
       })
-        .select(
-          "_id name slug parent level path"
-        )
+        .select("_id name slug parent level path")
         .lean();
 
-      // -----------------------------------------------
-      // Category not found
-      // -----------------------------------------------
+      // =================================================
+      // CATEGORY NOT FOUND
+      // =================================================
 
       if (!categoryData) {
         return res.status(200).json({
@@ -864,279 +862,163 @@ export const getAllProduct = async (req, res) => {
       }
 
       // =================================================
-      // LEVEL 0
-      // MAIN CATEGORY
-      //
-      // Example:
-      //
-      // Phones
-      // ├── Samsung
-      // ├── Apple
-      // ├── Xiaomi
-      // └── OnePlus
-      //
-      // Phones click করলে সব brand-এর product আসবে
-      //
-      // এবং additionalCategories-এ Phones দেওয়া
-      // product-ও এখানে আসবে।
+      // FIND ALL CHILD / DESCENDANT CATEGORIES
       // =================================================
 
-      if (categoryData.level === 0) {
-        const descendants = await Category.find({
-          $or: [
-            {
-              path: categoryData._id,
-            },
-            {
-              path: {
-                $in: [categoryData._id],
-              },
-            },
-            {
-              parent: categoryData._id,
-            },
-          ],
-          isActive: true,
-        })
-          .select("_id")
-          .lean();
+      const descendants = await Category.find({
+        isActive: true,
 
-        // Main category + সব child category
-        const categoryIds = [
-          categoryData._id,
-          ...descendants.map(
-            (item) => item._id
-          ),
-        ];
-
-        // Remove duplicate IDs
-        const uniqueCategoryIds = [
-          ...new Map(
-            categoryIds.map((id) => [
-              String(id),
-              id,
-            ])
-          ).values(),
-        ];
-
-        filter.$or = [
-          // ---------------------------------------------
-          // Normal category
-          // ---------------------------------------------
-
+        $or: [
+          // Direct children
           {
-            category: {
-              $in: uniqueCategoryIds,
-            },
+            parent: categoryData._id,
           },
 
-          // ---------------------------------------------
-          // Sub category
-          // ---------------------------------------------
-
+          // Path contains category ID
           {
-            subCategory: {
-              $in: uniqueCategoryIds,
-            },
+            path: categoryData._id,
           },
 
-          // ---------------------------------------------
-          // Child category
-          // ---------------------------------------------
-
+          // Path array contains category ID
           {
-            childCategory: {
-              $in: uniqueCategoryIds,
+            path: {
+              $in: [categoryData._id],
             },
           },
-
-          // ---------------------------------------------
-          // Sub child category
-          // ---------------------------------------------
-
-          {
-            subChildCategory: {
-              $in: uniqueCategoryIds,
-            },
-          },
-
-          // ---------------------------------------------
-          // ⭐ Additional categories
-          //
-          // Example:
-          //
-          // Product:
-          // category = Apple Product
-          // subCategory = iPhone
-          //
-          // additionalCategories = [Phones]
-          //
-          // তাহলে Phones page-এও product আসবে।
-          // ---------------------------------------------
-
-          {
-            additionalCategories: {
-              $in: uniqueCategoryIds,
-            },
-          },
-        ];
-      }
+        ],
+      })
+        .select("_id")
+        .lean();
 
       // =================================================
-      // LEVEL 1
-      // SUB CATEGORY
+      // ALL CATEGORY IDS
+      // =================================================
+
+      const categoryIds = [
+        categoryData._id,
+
+        ...descendants.map(
+          (item) => item._id
+        ),
+      ];
+
+      // =================================================
+      // REMOVE DUPLICATES
+      // =================================================
+
+      const uniqueCategoryIds = [
+        ...new Map(
+          categoryIds.map((id) => [
+            String(id),
+            id,
+          ])
+        ).values(),
+      ];
+
+      // =================================================
+      // DEBUG
+      // =================================================
+
+      console.log(
+        "=========================================="
+      );
+
+      console.log(
+        "CATEGORY REQUEST:",
+        slug
+      );
+
+      console.log(
+        "CATEGORY NAME:",
+        categoryData.name
+      );
+
+      console.log(
+        "CATEGORY ID:",
+        String(categoryData._id)
+      );
+
+      console.log(
+        "CATEGORY LEVEL:",
+        categoryData.level
+      );
+
+      console.log(
+        "CATEGORY IDS:",
+        uniqueCategoryIds.map((id) =>
+          String(id)
+        )
+      );
+
+      console.log(
+        "=========================================="
+      );
+
+      // =================================================
+      // ⭐ PRODUCT CATEGORY MATCH
+      // =================================================
       //
-      // Example:
-      // Phones → iPhone
+      // Product can match through:
+      //
+      // category
+      // subCategory
+      // childCategory
+      // subChildCategory
+      // additionalCategories
       //
       // =================================================
 
-      else if (categoryData.level === 1) {
-        const descendants = await Category.find({
-          $or: [
-            {
-              path: categoryData._id,
-            },
-            {
-              path: {
-                $in: [categoryData._id],
-              },
-            },
-            {
-              parent: categoryData._id,
-            },
-          ],
-          isActive: true,
-        })
-          .select("_id")
-          .lean();
+      filter.$or = [
+        // -----------------------------------------------
+        // MAIN CATEGORY
+        // -----------------------------------------------
 
-        const categoryIds = [
-          categoryData._id,
-          ...descendants.map(
-            (item) => item._id
-          ),
-        ];
-
-        const uniqueCategoryIds = [
-          ...new Map(
-            categoryIds.map((id) => [
-              String(id),
-              id,
-            ])
-          ).values(),
-        ];
-
-        filter.$or = [
-          {
-            subCategory: {
-              $in: uniqueCategoryIds,
-            },
+        {
+          category: {
+            $in: uniqueCategoryIds,
           },
+        },
 
-          {
-            childCategory: {
-              $in: uniqueCategoryIds,
-            },
+        // -----------------------------------------------
+        // SUB CATEGORY
+        // -----------------------------------------------
+
+        {
+          subCategory: {
+            $in: uniqueCategoryIds,
           },
+        },
 
-          {
-            subChildCategory: {
-              $in: uniqueCategoryIds,
-            },
+        // -----------------------------------------------
+        // CHILD CATEGORY
+        // -----------------------------------------------
+
+        {
+          childCategory: {
+            $in: uniqueCategoryIds,
           },
+        },
 
-          // ⭐ Additional category
-          {
-            additionalCategories: {
-              $in: uniqueCategoryIds,
-            },
+        // -----------------------------------------------
+        // SUB CHILD CATEGORY
+        // -----------------------------------------------
+
+        {
+          subChildCategory: {
+            $in: uniqueCategoryIds,
           },
-        ];
-      }
+        },
 
-      // =================================================
-      // LEVEL 2
-      // CHILD CATEGORY
-      // =================================================
+        // -----------------------------------------------
+        // ⭐ ADDITIONAL CATEGORIES
+        // -----------------------------------------------
 
-      else if (categoryData.level === 2) {
-        const descendants = await Category.find({
-          $or: [
-            {
-              path: categoryData._id,
-            },
-            {
-              path: {
-                $in: [categoryData._id],
-              },
-            },
-            {
-              parent: categoryData._id,
-            },
-          ],
-          isActive: true,
-        })
-          .select("_id")
-          .lean();
-
-        const categoryIds = [
-          categoryData._id,
-          ...descendants.map(
-            (item) => item._id
-          ),
-        ];
-
-        const uniqueCategoryIds = [
-          ...new Map(
-            categoryIds.map((id) => [
-              String(id),
-              id,
-            ])
-          ).values(),
-        ];
-
-        filter.$or = [
-          {
-            childCategory: {
-              $in: uniqueCategoryIds,
-            },
+        {
+          additionalCategories: {
+            $in: uniqueCategoryIds,
           },
-
-          {
-            subChildCategory: {
-              $in: uniqueCategoryIds,
-            },
-          },
-
-          // ⭐ Additional category
-          {
-            additionalCategories: {
-              $in: uniqueCategoryIds,
-            },
-          },
-        ];
-      }
-
-      // =================================================
-      // LEVEL 3
-      // SUB CHILD CATEGORY
-      // =================================================
-
-      else if (categoryData.level === 3) {
-        filter.$or = [
-          {
-            subChildCategory:
-              categoryData._id,
-          },
-
-          // ⭐ Additional category
-          {
-            additionalCategories:
-              categoryData._id,
-          },
-        ];
-      }
+        },
+      ];
     }
 
     // =================================================
@@ -1281,7 +1163,7 @@ export const getAllProduct = async (req, res) => {
     };
 
     // =================================================
-    // BRAND
+    // BRANDS
     // =================================================
 
     const brands = unique(
@@ -1379,7 +1261,7 @@ export const getAllProduct = async (req, res) => {
         : 0;
 
     // =================================================
-    // CATEGORY RESPONSE
+    // SELECTED CATEGORY
     // =================================================
 
     let selectedCategory = null;
@@ -1428,10 +1310,15 @@ export const getAllProduct = async (req, res) => {
 
       filters: {
         brands,
+
         series,
+
         displaySizes,
+
         storage,
+
         processors,
+
         colors,
 
         price: {
@@ -1440,7 +1327,6 @@ export const getAllProduct = async (req, res) => {
         },
       },
     });
-
   } catch (error) {
     console.error(
       "Get all product error:",
@@ -1449,8 +1335,12 @@ export const getAllProduct = async (req, res) => {
 
     return res.status(500).json({
       success: false,
-      message: "Failed to get products",
-      error: error.message,
+
+      message:
+        "Failed to get products",
+
+      error:
+        error.message,
     });
   }
 };

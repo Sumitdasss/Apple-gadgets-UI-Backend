@@ -829,7 +829,7 @@ export const getAllProduct = async (req, res) => {
       // =================================================
 
       const categoryData = await Category.findOne({
-        slug,
+        slug: slug,
         isActive: true,
       })
         .select("_id name slug parent level path")
@@ -845,7 +845,6 @@ export const getAllProduct = async (req, res) => {
           count: 0,
           products: [],
           category: null,
-
           filters: {
             brands: [],
             series: [],
@@ -862,44 +861,29 @@ export const getAllProduct = async (req, res) => {
       }
 
       // =================================================
-      // FIND ALL CHILD / DESCENDANT CATEGORIES
+      // CURRENT CATEGORY ID
       // =================================================
 
-      const descendants = await Category.find({
+      const currentCategoryId = categoryData._id;
+
+      // =================================================
+      // FIND CHILD CATEGORIES
+      // =================================================
+
+      const children = await Category.find({
+        parent: currentCategoryId,
         isActive: true,
-
-        $or: [
-          // Direct children
-          {
-            parent: categoryData._id,
-          },
-
-          // Path contains category ID
-          {
-            path: categoryData._id,
-          },
-
-          // Path array contains category ID
-          {
-            path: {
-              $in: [categoryData._id],
-            },
-          },
-        ],
       })
         .select("_id")
         .lean();
 
       // =================================================
-      // ALL CATEGORY IDS
+      // CATEGORY IDS
       // =================================================
 
       const categoryIds = [
-        categoryData._id,
-
-        ...descendants.map(
-          (item) => item._id
-        ),
+        currentCategoryId,
+        ...children.map((item) => item._id),
       ];
 
       // =================================================
@@ -920,7 +904,7 @@ export const getAllProduct = async (req, res) => {
       // =================================================
 
       console.log(
-        "=========================================="
+        "======================================"
       );
 
       console.log(
@@ -935,7 +919,7 @@ export const getAllProduct = async (req, res) => {
 
       console.log(
         "CATEGORY ID:",
-        String(categoryData._id)
+        String(currentCategoryId)
       );
 
       console.log(
@@ -950,69 +934,60 @@ export const getAllProduct = async (req, res) => {
         )
       );
 
+      // =================================================
+      // IMPORTANT DEBUG
+      // =================================================
+
+      const additionalCategoryCount =
+        await Product.countDocuments({
+          additionalCategories:
+            currentCategoryId,
+        });
+
       console.log(
-        "=========================================="
+        "ADDITIONAL CATEGORY PRODUCT COUNT:",
+        additionalCategoryCount
+      );
+
+      console.log(
+        "======================================"
       );
 
       // =================================================
-      // ⭐ PRODUCT CATEGORY MATCH
-      // =================================================
-      //
-      // Product can match through:
-      //
-      // category
-      // subCategory
-      // childCategory
-      // subChildCategory
-      // additionalCategories
-      //
+      // ⭐ CATEGORY PRODUCT FILTER
       // =================================================
 
       filter.$or = [
-        // -----------------------------------------------
-        // MAIN CATEGORY
-        // -----------------------------------------------
-
+        // Product category
         {
           category: {
             $in: uniqueCategoryIds,
           },
         },
 
-        // -----------------------------------------------
-        // SUB CATEGORY
-        // -----------------------------------------------
-
+        // Product subCategory
         {
           subCategory: {
             $in: uniqueCategoryIds,
           },
         },
 
-        // -----------------------------------------------
-        // CHILD CATEGORY
-        // -----------------------------------------------
-
+        // Product childCategory
         {
           childCategory: {
             $in: uniqueCategoryIds,
           },
         },
 
-        // -----------------------------------------------
-        // SUB CHILD CATEGORY
-        // -----------------------------------------------
-
+        // Product subChildCategory
         {
           subChildCategory: {
             $in: uniqueCategoryIds,
           },
         },
 
-        // -----------------------------------------------
-        // ⭐ ADDITIONAL CATEGORIES
-        // -----------------------------------------------
-
+        // ⭐ VERY IMPORTANT
+        // additionalCategories
         {
           additionalCategories: {
             $in: uniqueCategoryIds,
@@ -1142,7 +1117,7 @@ export const getAllProduct = async (req, res) => {
       .lean();
 
     // =================================================
-    // UNIQUE HELPER
+    // UNIQUE
     // =================================================
 
     const unique = (items) => {
@@ -1163,7 +1138,7 @@ export const getAllProduct = async (req, res) => {
     };
 
     // =================================================
-    // BRANDS
+    // FILTER DATA
     // =================================================
 
     const brands = unique(
@@ -1172,19 +1147,11 @@ export const getAllProduct = async (req, res) => {
       )
     );
 
-    // =================================================
-    // SERIES
-    // =================================================
-
     const series = unique(
       products.map(
         (product) => product.series
       )
     );
-
-    // =================================================
-    // DISPLAY SIZE
-    // =================================================
 
     const displaySizes = unique(
       products.map(
@@ -1195,29 +1162,17 @@ export const getAllProduct = async (req, res) => {
       )
     );
 
-    // =================================================
-    // STORAGE
-    // =================================================
-
     const storage = unique(
       products.map(
         (product) => product.storage
       )
     );
 
-    // =================================================
-    // PROCESSOR
-    // =================================================
-
     const processors = unique(
       products.map(
         (product) => product.processor
       )
     );
-
-    // =================================================
-    // COLORS
-    // =================================================
 
     const colors = unique(
       products.flatMap(
@@ -1272,7 +1227,6 @@ export const getAllProduct = async (req, res) => {
           slug: category
             .trim()
             .toLowerCase(),
-
           isActive: true,
         })
           .select(
@@ -1335,12 +1289,8 @@ export const getAllProduct = async (req, res) => {
 
     return res.status(500).json({
       success: false,
-
-      message:
-        "Failed to get products",
-
-      error:
-        error.message,
+      message: "Failed to get products",
+      error: error.message,
     });
   }
 };

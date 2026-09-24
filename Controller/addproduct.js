@@ -15,7 +15,7 @@ export const addProduct = async (req, res) => {
       slug,
       description,
       shortDescription,
-
+additionalCategories,
       category,
       subCategory,
       childCategory,
@@ -491,7 +491,7 @@ if (stock === undefined || stock === "") {
         // ====================================
         // BRAND
         // ====================================
-
+        additionalCategories:additionalCategories,
         brand:
           brand?.trim() || "",
 
@@ -705,16 +705,11 @@ export const getAllProduct = async (req, res) => {
       sort = "newest",
     } = req.query;
 
-
     // =================================================
     // BASE FILTER
     // =================================================
 
-    const filter = {
-      // এখানে আপাতত isActive দিচ্ছি না
-      // কারণ তোমার দেখানো product-এ isActive: false আছে।
-    };
-
+    const filter = {};
 
     // =================================================
     // CATEGORY FILTER
@@ -723,27 +718,28 @@ export const getAllProduct = async (req, res) => {
     if (category.trim()) {
       const slug = category.trim().toLowerCase();
 
-
-      // ===============================================
-      // Find Category by slug
-      // ===============================================
+      // -----------------------------------------------
+      // Find requested category
+      // -----------------------------------------------
 
       const categoryData = await Category.findOne({
-        slug: slug,
+        slug,
         isActive: true,
-      }).lean();
+      })
+        .select(
+          "_id name slug parent level path"
+        )
+        .lean();
 
-
-      // ===============================================
-      // Category পাওয়া যায়নি
-      // ===============================================
+      // -----------------------------------------------
+      // Category not found
+      // -----------------------------------------------
 
       if (!categoryData) {
         return res.status(200).json({
           success: true,
           count: 0,
           products: [],
-
           category: null,
 
           filters: {
@@ -753,42 +749,289 @@ export const getAllProduct = async (req, res) => {
             storage: [],
             processors: [],
             colors: [],
+            price: {
+              min: 0,
+              max: 0,
+            },
           },
         });
       }
 
-
-      // ===============================================
-      // level অনুযায়ী Product field select
-      // ===============================================
+      // =================================================
+      // LEVEL 0
+      // MAIN CATEGORY
+      //
+      // Example:
+      //
+      // Phones
+      // ├── Samsung
+      // ├── Apple
+      // ├── Xiaomi
+      // └── OnePlus
+      //
+      // Phones click করলে সব brand-এর product আসবে
+      //
+      // এবং additionalCategories-এ Phones দেওয়া
+      // product-ও এখানে আসবে।
+      // =================================================
 
       if (categoryData.level === 0) {
-        // Main Category
+        const descendants = await Category.find({
+          $or: [
+            {
+              path: categoryData._id,
+            },
+            {
+              path: {
+                $in: [categoryData._id],
+              },
+            },
+            {
+              parent: categoryData._id,
+            },
+          ],
+          isActive: true,
+        })
+          .select("_id")
+          .lean();
 
-        filter.category = categoryData._id;
+        // Main category + সব child category
+        const categoryIds = [
+          categoryData._id,
+          ...descendants.map(
+            (item) => item._id
+          ),
+        ];
+
+        // Remove duplicate IDs
+        const uniqueCategoryIds = [
+          ...new Map(
+            categoryIds.map((id) => [
+              String(id),
+              id,
+            ])
+          ).values(),
+        ];
+
+        filter.$or = [
+          // ---------------------------------------------
+          // Normal category
+          // ---------------------------------------------
+
+          {
+            category: {
+              $in: uniqueCategoryIds,
+            },
+          },
+
+          // ---------------------------------------------
+          // Sub category
+          // ---------------------------------------------
+
+          {
+            subCategory: {
+              $in: uniqueCategoryIds,
+            },
+          },
+
+          // ---------------------------------------------
+          // Child category
+          // ---------------------------------------------
+
+          {
+            childCategory: {
+              $in: uniqueCategoryIds,
+            },
+          },
+
+          // ---------------------------------------------
+          // Sub child category
+          // ---------------------------------------------
+
+          {
+            subChildCategory: {
+              $in: uniqueCategoryIds,
+            },
+          },
+
+          // ---------------------------------------------
+          // ⭐ Additional categories
+          //
+          // Example:
+          //
+          // Product:
+          // category = Apple Product
+          // subCategory = iPhone
+          //
+          // additionalCategories = [Phones]
+          //
+          // তাহলে Phones page-এও product আসবে।
+          // ---------------------------------------------
+
+          {
+            additionalCategories: {
+              $in: uniqueCategoryIds,
+            },
+          },
+        ];
       }
+
+      // =================================================
+      // LEVEL 1
+      // SUB CATEGORY
+      //
+      // Example:
+      // Phones → iPhone
+      //
+      // =================================================
 
       else if (categoryData.level === 1) {
-        // Sub Category
+        const descendants = await Category.find({
+          $or: [
+            {
+              path: categoryData._id,
+            },
+            {
+              path: {
+                $in: [categoryData._id],
+              },
+            },
+            {
+              parent: categoryData._id,
+            },
+          ],
+          isActive: true,
+        })
+          .select("_id")
+          .lean();
 
-        filter.subCategory = categoryData._id;
+        const categoryIds = [
+          categoryData._id,
+          ...descendants.map(
+            (item) => item._id
+          ),
+        ];
+
+        const uniqueCategoryIds = [
+          ...new Map(
+            categoryIds.map((id) => [
+              String(id),
+              id,
+            ])
+          ).values(),
+        ];
+
+        filter.$or = [
+          {
+            subCategory: {
+              $in: uniqueCategoryIds,
+            },
+          },
+
+          {
+            childCategory: {
+              $in: uniqueCategoryIds,
+            },
+          },
+
+          {
+            subChildCategory: {
+              $in: uniqueCategoryIds,
+            },
+          },
+
+          // ⭐ Additional category
+          {
+            additionalCategories: {
+              $in: uniqueCategoryIds,
+            },
+          },
+        ];
       }
+
+      // =================================================
+      // LEVEL 2
+      // CHILD CATEGORY
+      // =================================================
 
       else if (categoryData.level === 2) {
-        // Child Category
+        const descendants = await Category.find({
+          $or: [
+            {
+              path: categoryData._id,
+            },
+            {
+              path: {
+                $in: [categoryData._id],
+              },
+            },
+            {
+              parent: categoryData._id,
+            },
+          ],
+          isActive: true,
+        })
+          .select("_id")
+          .lean();
 
-        filter.childCategory =
-          categoryData._id;
+        const categoryIds = [
+          categoryData._id,
+          ...descendants.map(
+            (item) => item._id
+          ),
+        ];
+
+        const uniqueCategoryIds = [
+          ...new Map(
+            categoryIds.map((id) => [
+              String(id),
+              id,
+            ])
+          ).values(),
+        ];
+
+        filter.$or = [
+          {
+            childCategory: {
+              $in: uniqueCategoryIds,
+            },
+          },
+
+          {
+            subChildCategory: {
+              $in: uniqueCategoryIds,
+            },
+          },
+
+          // ⭐ Additional category
+          {
+            additionalCategories: {
+              $in: uniqueCategoryIds,
+            },
+          },
+        ];
       }
+
+      // =================================================
+      // LEVEL 3
+      // SUB CHILD CATEGORY
+      // =================================================
 
       else if (categoryData.level === 3) {
-        // Sub Child Category
+        filter.$or = [
+          {
+            subChildCategory:
+              categoryData._id,
+          },
 
-        filter.subChildCategory =
-          categoryData._id;
+          // ⭐ Additional category
+          {
+            additionalCategories:
+              categoryData._id,
+          },
+        ];
       }
     }
-
 
     // =================================================
     // BRAND FILTER
@@ -806,7 +1049,6 @@ export const getAllProduct = async (req, res) => {
         };
       }
     }
-
 
     // =================================================
     // PRICE FILTER
@@ -826,7 +1068,6 @@ export const getAllProduct = async (req, res) => {
       }
     }
 
-
     // =================================================
     // STOCK FILTER
     // =================================================
@@ -843,7 +1084,6 @@ export const getAllProduct = async (req, res) => {
       };
     }
 
-
     // =================================================
     // SORT
     // =================================================
@@ -851,7 +1091,6 @@ export const getAllProduct = async (req, res) => {
     let sortOption = {
       createdAt: -1,
     };
-
 
     switch (sort) {
       case "price-low":
@@ -886,7 +1125,6 @@ export const getAllProduct = async (req, res) => {
         break;
     }
 
-
     // =================================================
     // GET PRODUCTS
     // =================================================
@@ -908,12 +1146,15 @@ export const getAllProduct = async (req, res) => {
         "subChildCategory",
         "name slug level parent"
       )
+      .populate(
+        "additionalCategories",
+        "name slug level parent"
+      )
       .sort(sortOption)
       .lean();
 
-
     // =================================================
-    // DYNAMIC FILTER DATA
+    // UNIQUE HELPER
     // =================================================
 
     const unique = (items) => {
@@ -933,10 +1174,9 @@ export const getAllProduct = async (req, res) => {
       ];
     };
 
-
-    // ===============================================
+    // =================================================
     // BRAND
-    // ===============================================
+    // =================================================
 
     const brands = unique(
       products.map(
@@ -944,10 +1184,9 @@ export const getAllProduct = async (req, res) => {
       )
     );
 
-
-    // ===============================================
+    // =================================================
     // SERIES
-    // ===============================================
+    // =================================================
 
     const series = unique(
       products.map(
@@ -955,10 +1194,9 @@ export const getAllProduct = async (req, res) => {
       )
     );
 
-
-    // ===============================================
+    // =================================================
     // DISPLAY SIZE
-    // ===============================================
+    // =================================================
 
     const displaySizes = unique(
       products.map(
@@ -969,10 +1207,9 @@ export const getAllProduct = async (req, res) => {
       )
     );
 
-
-    // ===============================================
+    // =================================================
     // STORAGE
-    // ===============================================
+    // =================================================
 
     const storage = unique(
       products.map(
@@ -980,10 +1217,9 @@ export const getAllProduct = async (req, res) => {
       )
     );
 
-
-    // ===============================================
+    // =================================================
     // PROCESSOR
-    // ===============================================
+    // =================================================
 
     const processors = unique(
       products.map(
@@ -991,10 +1227,9 @@ export const getAllProduct = async (req, res) => {
       )
     );
 
-
-    // ===============================================
+    // =================================================
     // COLORS
-    // ===============================================
+    // =================================================
 
     const colors = unique(
       products.flatMap(
@@ -1004,16 +1239,15 @@ export const getAllProduct = async (req, res) => {
                 (color) =>
                   typeof color === "string"
                     ? color
-                    : color.name
+                    : color?.name
               )
             : []
       )
     );
 
-
-    // ===============================================
+    // =================================================
     // PRICE RANGE
-    // ===============================================
+    // =================================================
 
     const prices = products
       .map(
@@ -1028,18 +1262,36 @@ export const getAllProduct = async (req, res) => {
         (price) => price > 0
       );
 
-
     const minProductPrice =
       prices.length
         ? Math.min(...prices)
         : 0;
-
 
     const maxProductPrice =
       prices.length
         ? Math.max(...prices)
         : 0;
 
+    // =================================================
+    // CATEGORY RESPONSE
+    // =================================================
+
+    let selectedCategory = null;
+
+    if (category.trim()) {
+      selectedCategory =
+        await Category.findOne({
+          slug: category
+            .trim()
+            .toLowerCase(),
+
+          isActive: true,
+        })
+          .select(
+            "name slug level parent path"
+          )
+          .lean();
+    }
 
     // =================================================
     // RESPONSE
@@ -1052,16 +1304,19 @@ export const getAllProduct = async (req, res) => {
 
       products,
 
-      category: category
+      category: selectedCategory
         ? {
-            name: (
-              await Category.findOne({
-                slug: category
-                  .trim()
-                  .toLowerCase(),
-              }).select("name slug level parent")
-            )?.name,
-            slug: category,
+            name:
+              selectedCategory.name,
+
+            slug:
+              selectedCategory.slug,
+
+            level:
+              selectedCategory.level,
+
+            parent:
+              selectedCategory.parent,
           }
         : null,
 

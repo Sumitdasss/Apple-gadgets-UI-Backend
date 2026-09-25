@@ -14,6 +14,11 @@ router.post('/addproduct',upload.fields([
     maxCount: 20,
   },
 ]),addProduct);
+
+
+router.get("/webhook", verifyWebhook);
+
+router.post("/webhook", receiveWebhook);
 router.get('/getallProduct',getAllProduct);
 
 router.post("/creatcatagori", createCategory);
@@ -40,16 +45,6 @@ router.put("/:id", updateCategory);
 
 
 router.delete("/:id", deleteCategory);
-router.get(
-  "/webhook",
-  verifyWebhook
-);
-
-
-router.post(
-  "/webhook",
-  receiveWebhook
-);
 
 
 

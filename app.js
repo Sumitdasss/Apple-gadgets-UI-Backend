@@ -32,7 +32,7 @@ app.use(express.urlencoded({ extended: true }));
 
 // ================= ROUTES =================
 app.use("/", router);
-app.use("/api/Facebook" ,router)
+app.use("/facebook" ,router)
 
 
 export default app;

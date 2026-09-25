@@ -3,6 +3,7 @@ import { addProduct, getAllProduct } from '../Controller/addproduct.js';
 import upload from '../midddlewere/upload.js';
 import { getAllCategories, getCategoryTree,createCategory,getAllChildCategories,createChildCategory,getRootCategories,getChildCategories,getCategoryById,updateCategory,deleteCategory } from '../Controller/Catgorihandelar.js';
 import { receiveWebhook, verifyWebhook } from '../Controller/messengerController.js';
+import { checkFacebookToken } from '../Service/messengerController.js';
 const router = express.Router();
 router.post('/addproduct',upload.fields([
   {
@@ -19,6 +20,10 @@ router.post('/addproduct',upload.fields([
 router.get("/webhook", verifyWebhook);
 
 router.post("/webhook", receiveWebhook);
+router.get(
+  "/webhook/check-token",
+  checkFacebookToken
+);
 
 router.get('/getallProduct',getAllProduct);
 

@@ -1696,12 +1696,24 @@ export async function handleMessage(
           `এই মুহূর্তে আপনার requestটি process করতে সমস্যা হচ্ছে।\n\n` +
           `কিছুক্ষণ পরে আবার চেষ্টা করুন।`
       );
-    } catch (sendError) {
-      console.error(
-        "[Messenger Send Error]:",
-        sendError
-      );
-    }
+    } catch (error) {
+  console.error("❌ CHATBOT ERROR ==================");
+  console.error("Message:", rawText);
+  console.error("Sender ID:", senderId);
+  console.error("Error name:", error?.name);
+  console.error("Error message:", error?.message);
+  console.error("Error stack:", error?.stack);
+  console.error("====================================");
+
+  try {
+    await sendMessage(
+      senderId,
+      "দুঃখিত 😔 এই মুহূর্তে আপনার requestটি process করতে সমস্যা হচ্ছে। কিছুক্ষণ পরে আবার চেষ্টা করুন।"
+    );
+  } catch (sendError) {
+    console.error("❌ FAILED TO SEND ERROR MESSAGE:", sendError);
+  }
+}
   }
 }
 

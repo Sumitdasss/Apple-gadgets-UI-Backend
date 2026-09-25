@@ -2,6 +2,7 @@ import express from 'express';
 import { addProduct, getAllProduct } from '../Controller/addproduct.js';
 import upload from '../midddlewere/upload.js';
 import { getAllCategories, getCategoryTree,createCategory,getAllChildCategories,createChildCategory,getRootCategories,getChildCategories,getCategoryById,updateCategory,deleteCategory } from '../Controller/Catgorihandelar.js';
+import { receiveWebhook, verifyWebhook } from '../Controller/messengerController.js';
 const router = express.Router();
 router.post('/addproduct',upload.fields([
   {
@@ -39,7 +40,16 @@ router.put("/:id", updateCategory);
 
 
 router.delete("/:id", deleteCategory);
+router.get(
+  "/webhook",
+  verifyWebhook
+);
 
+
+router.post(
+  "/webhook",
+  receiveWebhook
+);
 
 
 

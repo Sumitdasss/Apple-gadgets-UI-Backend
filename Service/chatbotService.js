@@ -1345,19 +1345,18 @@ export async function handleMessage(
       `iPhone`
     );
   } catch (error) {
-    console.error(
-      "[Chatbot Error]",
-      error
-    );
+  console.error("====================================");
+  console.error("[Chatbot Error]");
+  console.error("Message:", error?.message);
+  console.error("Stack:", error?.stack);
+  console.error("Full Error:", error);
+  console.error("====================================");
 
-    return sendMessage(
-      messengerId,
-
-      `দুঃখিত 😔\n\n` +
-      `এই মুহূর্তে আপনার requestটি process করতে সমস্যা হচ্ছে।\n\n` +
-      `কিছুক্ষণ পরে আবার চেষ্টা করুন।`
-    );
-  }
+  await sendMessage(
+    senderId,
+    "দুঃখিত 😔\n\nএই মুহূর্তে আপনার requestটি process করতে সমস্যা হচ্ছে।\n\nকিছুক্ষণ পরে আবার চেষ্টা করুন।"
+  );
+}
 }
 
 /* =========================================================

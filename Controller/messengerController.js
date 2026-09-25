@@ -28,19 +28,18 @@ export function verifyWebhook(req, res) {
   return res.sendStatus(403);
 }
 
-
 /* =========================================================
    RECEIVE FACEBOOK WEBHOOK
 ========================================================= */
 
-export async function receiveWebhook(req, res) {
+export async function receiveWebhook(
+  req,
+  res
+) {
   try {
     const body = req.body;
 
-    /* =====================================================
-       CHECK FACEBOOK PAGE OBJECT
-    ===================================================== */
-
+    // Only accept Facebook Page webhook events
     if (
       !body ||
       body.object !== "page"
@@ -48,27 +47,14 @@ export async function receiveWebhook(req, res) {
       return res.sendStatus(404);
     }
 
-
-    /* =====================================================
-       LOOP ENTRIES
-    ===================================================== */
-
     for (
       const entry of body.entry || []
     ) {
-
-      /* ===================================================
-         LOOP MESSAGING EVENTS
-      =================================================== */
-
       for (
-        const event of entry.messaging || []
+        const event of
+          entry.messaging || []
       ) {
-
-        /* =================================================
-           IGNORE ECHO MESSAGE
-        ================================================= */
-
+        // Ignore invalid events and echo messages
         if (
           !event?.message ||
           event.message.is_echo
@@ -76,27 +62,13 @@ export async function receiveWebhook(req, res) {
           continue;
         }
 
-
-        /* =================================================
-           GET SENDER
-        ================================================= */
-
         const senderId =
           event?.sender?.id;
-
-
-        /* =================================================
-           GET MESSAGE
-        ================================================= */
 
         const message =
           event?.message?.text;
 
-
-        /* =================================================
-           EMPTY MESSAGE CHECK
-        ================================================= */
-
+        // Ignore events without sender/message
         if (
           !senderId ||
           !message
@@ -104,49 +76,29 @@ export async function receiveWebhook(req, res) {
           continue;
         }
 
-
-        /* =================================================
-           HANDLE MESSAGE
-        ================================================= */
-
         try {
           await handleMessage(
             senderId,
             message
           );
-
-        } catch (error) {
-
-          /*
-            Production-এ পুরো error log করছি না।
-            Access token leak এড়ানোর জন্য
-            কোনো Axios error object log করা হচ্ছে না।
-          */
-
+        } catch {
+          // Do not log raw errors.
+          // This prevents sensitive Axios/token data
+          // from appearing in production logs.
           continue;
         }
       }
     }
 
-
-    /* =====================================================
-       FACEBOOK EXPECTS 200
-    ===================================================== */
-
+    // Facebook requires a successful response
     return res
       .status(200)
       .send("EVENT_RECEIVED");
 
-  } catch (error) {
-
-    /*
-      কোনো unexpected error হলেও
-      Facebook-কে 200 response দেওয়া হবে।
-    */
-
+  } catch {
+    // Always acknowledge the webhook
     return res
       .status(200)
       .send("EVENT_RECEIVED");
   }
 }
-

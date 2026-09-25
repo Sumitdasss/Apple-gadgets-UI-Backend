@@ -14,39 +14,7 @@ export default async function sendMessage(
   const GRAPH_URL =
     `https://graph.facebook.com/${API_VERSION}/me/messages`;
 
-  console.log(
-    "========== FACEBOOK SEND =========="
-  );
-
-  console.log(
-    "Recipient ID:",
-    recipientId
-  );
-
-  console.log(
-    "Message:",
-    message
-  );
-
-  console.log(
-    "API Version:",
-    API_VERSION
-  );
-
-  console.log(
-    "PAGE ACCESS TOKEN EXISTS:",
-    Boolean(PAGE_ACCESS_TOKEN)
-  );
-
-  console.log(
-    "PAGE ACCESS TOKEN LENGTH:",
-    PAGE_ACCESS_TOKEN?.length || 0
-  );
-
-  // ==========================================
-  // CHECK ACCESS TOKEN
-  // ==========================================
-
+  // Check access token
   if (!PAGE_ACCESS_TOKEN) {
     throw new Error(
       "FACEBOOK_PAGE_ACCESS_TOKEN is missing"
@@ -54,10 +22,6 @@ export default async function sendMessage(
   }
 
   try {
-    // ==========================================
-    // SEND MESSAGE TO FACEBOOK
-    // ==========================================
-
     const response = await axios.post(
       GRAPH_URL,
       {
@@ -84,80 +48,35 @@ export default async function sendMessage(
       }
     );
 
-    // ==========================================
-    // SUCCESS
-    // ==========================================
-
-    console.log(
-      "========== FACEBOOK SEND SUCCESS =========="
-    );
-
-    console.log(
-      "Facebook Response:",
-      response.data
-    );
-
     return response.data;
 
   } catch (error) {
-    // ==========================================
-    // FACEBOOK ERROR
-    // ==========================================
-
     const fbError =
       error?.response?.data?.error;
 
     const status =
       error?.response?.status;
 
+    // Safe Facebook error log
     console.error(
-      "========== FACEBOOK SEND ERROR =========="
+      "[Facebook Send Error]",
+      {
+        status,
+        message:
+          fbError?.message ||
+          "Unknown Facebook error",
+        type:
+          fbError?.type,
+        code:
+          fbError?.code,
+        subcode:
+          fbError?.error_subcode,
+      }
     );
 
-    console.error(
-      "HTTP Status:",
-      status || "Unknown"
-    );
-
-    console.error(
-      "Facebook Error Message:",
-      fbError?.message ||
-        "Unknown Facebook error"
-    );
-
-    console.error(
-      "Facebook Error Type:",
-      fbError?.type ||
-        "Unknown"
-    );
-
-    console.error(
-      "Facebook Error Code:",
-      fbError?.code ||
-        "Unknown"
-    );
-
-    console.error(
-      "Facebook Error Subcode:",
-      fbError?.error_subcode ||
-        "None"
-    );
-
-    // ==========================================
-    // SAFE ERROR
-    // ==========================================
     // IMPORTANT:
-    // Never do:
-    //
-    // console.error(error)
-    //
-    // or:
-    //
-    // throw error
-    //
-    // because Axios error may contain
-    // Authorization header / access token.
-    // ==========================================
+    // Do not throw the original Axios error.
+    // It may contain the Authorization header/token.
 
     const safeError =
       new Error(
@@ -177,4 +96,3 @@ export default async function sendMessage(
     throw safeError;
   }
 }
-

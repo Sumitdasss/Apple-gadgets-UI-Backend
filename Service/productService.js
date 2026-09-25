@@ -482,6 +482,7 @@ function isStrongSearchWord(word = "") {
 
   /*
     Number/model থাকলে strong
+
     যেমন:
     17
     285k
@@ -784,10 +785,6 @@ async function findProductsByStrongWords(
     return [];
   }
 
-  /*
-    সব strong word match করতে হবে
-  */
-
   const conditions =
     strongWords.map((word) => {
       const regex = new RegExp(
@@ -953,34 +950,6 @@ export async function searchProducts(
       normalizedMessage
     );
 
-  console.log(
-    "===================================="
-  );
-
-  console.log(
-    "[Product Search Multiple]"
-  );
-
-  console.log(
-    "User:",
-    message
-  );
-
-  console.log(
-    "Normalized:",
-    normalizedMessage
-  );
-
-  console.log(
-    "Cleaned:",
-    cleanedQuery
-  );
-
-  console.log(
-    "Words:",
-    searchWords
-  );
-
   /* =====================================================
      NOTHING TO SEARCH
   ===================================================== */
@@ -989,16 +958,12 @@ export async function searchProducts(
     !searchWords.length ||
     !cleanedQuery
   ) {
-    console.log(
-      "[Product Search] Nothing to search"
-    );
-
     return [];
   }
 
   /* =====================================================
      1. EXACT PRODUCT NAME
-     
+
      Example:
      Intel Core Ultra 9 285K Arrow Lake Processor
   ===================================================== */
@@ -1009,14 +974,6 @@ export async function searchProducts(
     );
 
   if (products.length > 0) {
-    console.log(
-      "[Product Search] Exact name:",
-      products.map(
-        (product) =>
-          product.name
-      )
-    );
-
     return products;
   }
 
@@ -1030,11 +987,6 @@ export async function searchProducts(
     );
 
   if (skuProduct) {
-    console.log(
-      "[Product Search] Exact SKU:",
-      skuProduct.name
-    );
-
     return [
       skuProduct,
     ];
@@ -1042,10 +994,10 @@ export async function searchProducts(
 
   /* =====================================================
      3. ALL SEARCH WORDS MATCH
-     
+
      Example:
      iphone 17 pro max
-     
+
      Must match:
      iphone
      17
@@ -1066,23 +1018,15 @@ export async function searchProducts(
         cleanedQuery
       );
 
-    console.log(
-      "[Product Search] All words matched:",
-      products.map(
-        (product) =>
-          product.name
-      )
-    );
-
     return products;
   }
 
   /* =====================================================
      4. STRONG WORD MATCH
-     
+
      Example:
      Intel 285K
-     
+
      Both Intel + 285K
      must exist.
   ===================================================== */
@@ -1100,23 +1044,12 @@ export async function searchProducts(
         cleanedQuery
       );
 
-    console.log(
-      "[Product Search] Strong words matched:",
-      products.map(
-        (product) =>
-          product.name
-      )
-    );
-
     return products;
   }
 
   /* =====================================================
      5. SINGLE STRONG WORD
-     
-     Only allowed when query has
-     ONE strong word.
-     
+
      Example:
      iphone
      samsung
@@ -1124,7 +1057,7 @@ export async function searchProducts(
      ipad
      airpods
      intel
-     
+
      This allows category/family search.
   ===================================================== */
 
@@ -1151,33 +1084,21 @@ export async function searchProducts(
           cleanedQuery
         );
 
-      console.log(
-        "[Product Search] Single strong word:",
-        products.map(
-          (product) =>
-            product.name
-        )
-      );
-
       return products;
     }
   }
 
   /* =====================================================
      IMPORTANT
-     
-     এখানে আর ANY WORD SEARCH নেই।
-     
-     কারণ:
-     
+
+     এখানে ANY WORD SEARCH নেই।
+
+     তাই:
+
      Intel Core Ultra 9 285K Arrow Lake Processor
-     
+
      না পেলে TP-Link যেন না আসে।
   ===================================================== */
-
-  console.log(
-    "[Product Search] No reliable product found"
-  );
 
   return [];
 }
@@ -1481,10 +1402,41 @@ export function getProductSpecifications(
     return null;
   }
 
-  return (
-    product.specifications ||
-    null
-  );
+  const specifications =
+    product.specifications;
+
+  if (!specifications) {
+    return null;
+  }
+
+  /* Object হলে সরাসরি return */
+
+  if (
+    typeof specifications ===
+      "object" &&
+    !Array.isArray(
+      specifications
+    )
+  ) {
+    return specifications;
+  }
+
+  /* JSON string হলে parse */
+
+  if (
+    typeof specifications ===
+    "string"
+  ) {
+    try {
+      return JSON.parse(
+        specifications
+      );
+    } catch {
+      return specifications;
+    }
+  }
+
+  return specifications;
 }
 
 /* =========================================================

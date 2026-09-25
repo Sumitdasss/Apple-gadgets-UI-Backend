@@ -1,3 +1,4 @@
+
 import Customer from "../Model/Customer.js";
 import Conversation from "../Model/Conversation.js";
 import Order from "../Model/Order.js";
@@ -717,14 +718,6 @@ export async function handleMessage(
     const text =
       normalize(rawText);
 
-    console.log(
-      "===================================="
-    );
-
-    console.log(
-      `[Chatbot] ${messengerId}: ${rawText}`
-    );
-
     /* =====================================================
        CUSTOMER + CONVERSATION
     ===================================================== */
@@ -736,20 +729,6 @@ export async function handleMessage(
       await getCustomerAndConversation(
         messengerId
       );
-
-    console.log(
-      "[Chatbot State Before]:",
-      conversation.state
-    );
-
-    console.log(
-      "[Chatbot Selected Product]:",
-      conversation.product
-        ? String(
-            conversation.product
-          )
-        : "NONE"
-    );
 
     /* =====================================================
        GLOBAL CANCEL
@@ -1161,14 +1140,9 @@ export async function handleMessage(
               "facebook_messenger",
           });
 
-        console.log(
-          "[Chatbot] Order Created:",
-          order.orderId
-        );
-
-        /* -----------------------------------------------
+        /* =================================================
            DECREASE STOCK
-        ------------------------------------------------ */
+        ================================================= */
 
         product.stock =
           Math.max(
@@ -1395,13 +1369,7 @@ export async function handleMessage(
     if (
       wantsOrder(text)
     ) {
-      console.log(
-        "[Chatbot] ORDER INTENT"
-      );
-
       let product = null;
-
-      /* Existing selected product */
 
       if (
         conversation.product
@@ -1410,30 +1378,14 @@ export async function handleMessage(
           await getConversationProduct(
             conversation
           );
-
-        console.log(
-          "[Order] Existing product:",
-          product?.name ||
-            "NOT FOUND"
-        );
       }
-
-      /* Search product */
 
       if (!product) {
         product =
           await searchProduct(
             rawText
           );
-
-        console.log(
-          "[Order] Search product:",
-          product?.name ||
-            "NOT FOUND"
-        );
       }
-
-      /* Product not found */
 
       if (!product) {
         return sendMessage(
@@ -1459,8 +1411,6 @@ export async function handleMessage(
             `অন্য কোনো product-এর নাম লিখে চেষ্টা করতে পারেন।`
         );
       }
-
-      /* Save product */
 
       conversation.product =
         product._id;
@@ -1508,31 +1458,10 @@ export async function handleMessage(
        PRODUCT SEARCH
     ===================================================== */
 
-    console.log(
-      "[Chatbot] PRODUCT SEARCH:",
-      rawText
-    );
-
     const products =
       await searchProducts(
         rawText
       );
-
-    console.log(
-      "[Chatbot] Products Found:",
-      products.map(
-        (p) => ({
-          id: p?._id,
-          name: p?.name,
-          price: p?.price,
-          discountPrice:
-            p?.discountPrice,
-          stock: p?.stock,
-          isActive:
-            p?.isActive,
-        })
-      )
-    );
 
     /* =====================================================
        SINGLE PRODUCT
@@ -1547,11 +1476,6 @@ export async function handleMessage(
       await saveSelectedProduct(
         conversation,
         product
-      );
-
-      console.log(
-        "[Chatbot] Selected Product Saved:",
-        product.name
       );
 
       if (
@@ -1753,62 +1677,12 @@ export async function handleMessage(
         `অথবা শুধু লিখুন:\n` +
         `iPhone`
     );
+
   } catch (error) {
     /* =====================================================
-       SAFE ERROR LOG
-       NEVER LOG FULL AXIOS ERROR
+       SAFE ERROR HANDLING
     ===================================================== */
 
-    console.error(
-      "===================================="
-    );
-
-    console.error(
-      "[Chatbot Error]"
-    );
-
-    console.error(
-      "Messenger ID:",
-      messengerId
-    );
-
-    console.error(
-      "Message:",
-      message
-    );
-
-    console.error(
-      "Error Name:",
-      error?.name
-    );
-
-    console.error(
-      "Error Message:",
-      error?.message
-    );
-
-    /*
-      IMPORTANT:
-
-      Do NOT use:
-
-      console.error(error);
-      console.error("Full Error:", error);
-      console.error(error.config);
-      console.error(error.response);
-      console.log(process.env.FACEBOOK_PAGE_ACCESS_TOKEN);
-
-      These can expose sensitive Facebook credentials.
-    */
-
-    console.error(
-      "===================================="
-    );
-
-    /* =====================================================
-       SAFE ERROR MESSAGE TO CUSTOMER
-    ===================================================== */
-console.log("")
     try {
       await sendMessage(
         messengerId,
@@ -1817,21 +1691,9 @@ console.log("")
           `এই মুহূর্তে আপনার requestটি process করতে সমস্যা হচ্ছে।\n\n` +
           `কিছুক্ষণ পরে আবার চেষ্টা করুন।`
       );
-    } catch (sendError) {
-      /*
-        Only log safe information.
-        Never log the complete Axios error.
-      */
-
-      console.error(
-        "[Send Error Name]:",
-        sendError?.name
-      );
-
-      console.error(
-        "[Send Error Message]:",
-        sendError?.message
-      );
+    } catch {
+      // Do nothing.
+      // Never log the complete Axios error.
     }
   }
 }
@@ -1843,3 +1705,4 @@ console.log("")
 export default {
   handleMessage,
 };
+

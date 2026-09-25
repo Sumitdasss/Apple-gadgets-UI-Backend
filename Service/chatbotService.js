@@ -1808,7 +1808,7 @@ export async function handleMessage(
     /* =====================================================
        SAFE ERROR MESSAGE TO CUSTOMER
     ===================================================== */
-
+console.log("")
     try {
       await sendMessage(
         messengerId,

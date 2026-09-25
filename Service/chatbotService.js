@@ -1,3 +1,4 @@
+
 import Customer from "../Model/Customer.js";
 import Conversation from "../Model/Conversation.js";
 import Order from "../Model/Order.js";
@@ -178,7 +179,7 @@ function asksProductInfo(text) {
 
 /* =========================================================
    PURE INTENT MESSAGE CHECK
-   ========================================================= */
+========================================================= */
 
 function isOnlyDetailsRequest(text) {
   return [
@@ -504,7 +505,8 @@ function buildProductDetailsReply(product) {
           if (key) {
             reply += `• ${key}: ${value}\n`;
           } else {
-            reply += `• ${JSON.stringify(item)}\n`;
+            reply +=
+              `• ${JSON.stringify(item)}\n`;
           }
         } else {
           reply += `• ${item}\n`;
@@ -653,7 +655,10 @@ export async function handleMessage(
     const rawText = message.trim();
     const text = normalize(rawText);
 
-    console.log("====================================");
+    console.log(
+      "===================================="
+    );
+
     console.log(
       `[Chatbot] ${messengerId}: ${rawText}`
     );
@@ -705,10 +710,6 @@ export async function handleMessage(
 
     /* =====================================================
        1. WAITING NAME
-       
-       VERY IMPORTANT:
-       এখানে ঢুকলে আর নিচের কোনো product search
-       চলবে না।
     ===================================================== */
 
     if (
@@ -1086,20 +1087,6 @@ export async function handleMessage(
 
     /* =====================================================
        6. DETAILS OF ALREADY SELECTED PRODUCT
-       
-       IMPORTANT FIX
-       
-       User:
-       Intel Core Ultra...
-       
-       Bot:
-       Product
-       
-       User:
-       details
-       
-       এখানে নতুন search না করে conversation.product
-       ব্যবহার হবে।
     ===================================================== */
 
     if (
@@ -1222,8 +1209,6 @@ export async function handleMessage(
 
     /* =====================================================
        9. WAITING QUANTITY
-       
-       Product search-এর আগেই থাকবে।
     ===================================================== */
 
     if (
@@ -1297,9 +1282,6 @@ export async function handleMessage(
 
     /* =====================================================
        10. ORDER INTENT
-       
-       IMPORTANT FIX:
-       Existing selected product থাকলে সেটাই ব্যবহার হবে।
     ===================================================== */
 
     if (wantsOrder(text)) {
@@ -1310,8 +1292,7 @@ export async function handleMessage(
       let product = null;
 
       /* -----------------------------------------------
-         প্রথম priority:
-         Conversation-এর selected product
+         Existing selected product
       ------------------------------------------------ */
 
       if (conversation.product) {
@@ -1327,8 +1308,7 @@ export async function handleMessage(
       }
 
       /* -----------------------------------------------
-         দ্বিতীয় priority:
-         Message-এর মধ্যে product name থাকলে search
+         Search product from message
       ------------------------------------------------ */
 
       if (!product) {
@@ -1344,7 +1324,7 @@ export async function handleMessage(
       }
 
       /* -----------------------------------------------
-         Product পাওয়া যায়নি
+         Product not found
       ------------------------------------------------ */
 
       if (!product) {
@@ -1373,7 +1353,7 @@ export async function handleMessage(
       }
 
       /* -----------------------------------------------
-         ⭐ Save selected product
+         Save selected product
       ------------------------------------------------ */
 
       conversation.product =
@@ -1412,8 +1392,6 @@ export async function handleMessage(
 
     /* =====================================================
        11. PRODUCT SEARCH
-       
-       এখানে আসবে শুধুমাত্র যখন কোনো order state নেই।
     ===================================================== */
 
     console.log(
@@ -1448,11 +1426,6 @@ export async function handleMessage(
       const product =
         products[0];
 
-      /* -----------------------------------------------
-         ⭐ IMPORTANT:
-         Every successful product search saves product
-      ------------------------------------------------ */
-
       await saveSelectedProduct(
         conversation,
         product
@@ -1463,10 +1436,6 @@ export async function handleMessage(
         product.name
       );
 
-      /* -----------------------------------------------
-         Details
-      ------------------------------------------------ */
-
       if (asksProductInfo(text)) {
         return sendMessage(
           messengerId,
@@ -1476,10 +1445,6 @@ export async function handleMessage(
           )
         );
       }
-
-      /* -----------------------------------------------
-         Stock
-      ------------------------------------------------ */
 
       if (asksStock(text)) {
         const stock =
@@ -1496,10 +1461,6 @@ export async function handleMessage(
             }`
         );
       }
-
-      /* -----------------------------------------------
-         Price
-      ------------------------------------------------ */
 
       if (asksPrice(text)) {
         const price =
@@ -1522,10 +1483,6 @@ export async function handleMessage(
             }`
         );
       }
-
-      /* -----------------------------------------------
-         Normal product
-      ------------------------------------------------ */
 
       return sendMessage(
         messengerId,
@@ -1641,7 +1598,6 @@ export async function handleMessage(
 
     /* =====================================================
        19. FINAL FALLBACK
-       
        NO OPENAI
     ===================================================== */
 
@@ -1661,6 +1617,10 @@ export async function handleMessage(
         `iPhone`
     );
   } catch (error) {
+    /* =====================================================
+       MAIN CHATBOT ERROR
+    ===================================================== */
+
     console.error(
       "===================================="
     );
@@ -1670,7 +1630,22 @@ export async function handleMessage(
     );
 
     console.error(
+      "Messenger ID:",
+      messengerId
+    );
+
+    console.error(
       "Message:",
+      message
+    );
+
+    console.error(
+      "Error Name:",
+      error?.name
+    );
+
+    console.error(
+      "Error Message:",
       error?.message
     );
 
@@ -1688,6 +1663,10 @@ export async function handleMessage(
       "===================================="
     );
 
+    /* =====================================================
+       ERROR RESPONSE TO USER
+    ===================================================== */
+
     try {
       await sendMessage(
         messengerId,
@@ -1696,24 +1675,30 @@ export async function handleMessage(
           `এই মুহূর্তে আপনার requestটি process করতে সমস্যা হচ্ছে।\n\n` +
           `কিছুক্ষণ পরে আবার চেষ্টা করুন।`
       );
-    } catch (error) {
-  console.error("❌ CHATBOT ERROR ==================");
-  console.error("Message:", rawText);
-  console.error("Sender ID:", senderId);
-  console.error("Error name:", error?.name);
-  console.error("Error message:", error?.message);
-  console.error("Error stack:", error?.stack);
-  console.error("====================================");
+    } catch (sendError) {
+      /* ===============================================
+         SEND ERROR RESPONSE FAILED
+      =============================================== */
 
-  try {
-    await sendMessage(
-      senderId,
-      "দুঃখিত 😔 এই মুহূর্তে আপনার requestটি process করতে সমস্যা হচ্ছে। কিছুক্ষণ পরে আবার চেষ্টা করুন।"
-    );
-  } catch (sendError) {
-    console.error("❌ FAILED TO SEND ERROR MESSAGE:", sendError);
-  }
-}
+      console.error(
+        "❌ FAILED TO SEND ERROR MESSAGE"
+      );
+
+      console.error(
+        "Send Error Name:",
+        sendError?.name
+      );
+
+      console.error(
+        "Send Error Message:",
+        sendError?.message
+      );
+
+      console.error(
+        "Send Error Stack:",
+        sendError?.stack
+      );
+    }
   }
 }
 
@@ -1724,3 +1709,4 @@ export async function handleMessage(
 export default {
   handleMessage,
 };
+

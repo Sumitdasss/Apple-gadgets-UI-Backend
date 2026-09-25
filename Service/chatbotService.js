@@ -121,6 +121,7 @@ function wantsOrder(text) {
     "অর্ডার",
     "নিব",
     "নিতে চাই",
+    "আমি order করতে চাই",
     "কিনব",
     "কিনতে চাই",
     "buy",
@@ -709,7 +710,122 @@ export async function handleMessage(
     }
 
     /* =====================================================
-       1. WAITING NAME
+       1. WAITING QUANTITY
+    ===================================================== */
+
+    if (
+      conversation.state ===
+      "waiting_quantity"
+    ) {
+      console.log(
+        "[Chatbot] WAITING_QUANTITY"
+      );
+
+      const quantity =
+        extractQuantity(rawText);
+
+      if (!quantity) {
+        return sendMessage(
+          messengerId,
+
+          `দয়া করে ১ থেকে ${MAX_QUANTITY}-এর মধ্যে একটি quantity লিখুন। 😊\n\n` +
+            `উদাহরণ:\n` +
+            `2`
+        );
+      }
+
+      const product =
+        await getConversationProduct(
+          conversation
+        );
+
+      if (!product) {
+        await resetConversation(
+          conversation
+        );
+
+        return sendMessage(
+          messengerId,
+
+          `দুঃখিত 😔\n\n` +
+            `এই productটি এখন পাওয়া যাচ্ছে না।`
+        );
+      }
+
+      const stock =
+        getProductStock(product);
+
+      if (stock <= 0) {
+        await resetConversation(
+          conversation
+        );
+
+        return sendMessage(
+          messengerId,
+
+          `দুঃখিত 😔\n\n` +
+            `${product.name} বর্তমানে Out of Stock।`
+        );
+      }
+
+      if (quantity > stock) {
+        return sendMessage(
+          messengerId,
+
+          `দুঃখিত 😊\n\n` +
+            `${product.name}-এর available stock হলো ${stock} pcs।\n\n` +
+            `আপনি সর্বোচ্চ ${Math.min(
+              stock,
+              MAX_QUANTITY
+            )} pcs নিতে পারবেন।\n\n` +
+            `আবার quantity লিখুন।`
+        );
+      }
+
+      /* -----------------------------------------------
+         SAVE QUANTITY
+      ------------------------------------------------ */
+
+      conversation.quantity =
+        quantity;
+
+      conversation.state =
+        "waiting_name";
+
+      await conversation.save();
+
+      const price =
+        getProductPrice(product);
+
+      const total =
+        price * quantity;
+
+      return sendMessage(
+        messengerId,
+
+        `ঠিক আছে! 😊\n\n` +
+
+          `📱 Product:\n` +
+          `${product.name}\n\n` +
+
+          `🔢 Quantity:\n` +
+          `${quantity} pcs\n\n` +
+
+          `💰 Unit Price:\n` +
+          `৳${formatPrice(price)}\n\n` +
+
+          `💵 Product Total:\n` +
+          `৳${formatPrice(total)}\n\n` +
+
+          `এখন আপনার নামটি লিখুন।\n\n` +
+
+          `উদাহরণ:\n` +
+          `Sumit Das`
+      );
+    }
+
+    /* =====================================================
+       2. WAITING NAME
     ===================================================== */
 
     if (
@@ -750,7 +866,7 @@ export async function handleMessage(
     }
 
     /* =====================================================
-       2. WAITING PHONE
+       3. WAITING PHONE
     ===================================================== */
 
     if (
@@ -798,7 +914,7 @@ export async function handleMessage(
     }
 
     /* =====================================================
-       3. WAITING ADDRESS
+       4. WAITING ADDRESS
     ===================================================== */
 
     if (
@@ -884,7 +1000,7 @@ export async function handleMessage(
     }
 
     /* =====================================================
-       4. WAITING CONFIRMATION
+       5. WAITING CONFIRMATION
     ===================================================== */
 
     if (
@@ -1065,7 +1181,7 @@ export async function handleMessage(
     }
 
     /* =====================================================
-       5. GREETING
+       6. GREETING
     ===================================================== */
 
     if (isGreeting(text)) {
@@ -1086,7 +1202,7 @@ export async function handleMessage(
     }
 
     /* =====================================================
-       6. DETAILS OF ALREADY SELECTED PRODUCT
+       7. DETAILS OF SELECTED PRODUCT
     ===================================================== */
 
     if (
@@ -1119,7 +1235,7 @@ export async function handleMessage(
     }
 
     /* =====================================================
-       7. PRICE OF ALREADY SELECTED PRODUCT
+       8. PRICE OF SELECTED PRODUCT
     ===================================================== */
 
     if (
@@ -1167,7 +1283,7 @@ export async function handleMessage(
     }
 
     /* =====================================================
-       8. STOCK OF ALREADY SELECTED PRODUCT
+       9. STOCK OF SELECTED PRODUCT
     ===================================================== */
 
     if (
@@ -1204,79 +1320,6 @@ export async function handleMessage(
           `Product-এর নাম লিখুন।\n\n` +
           `উদাহরণ:\n` +
           `iPhone 17 Pro Max`
-      );
-    }
-
-    /* =====================================================
-       9. WAITING QUANTITY
-    ===================================================== */
-
-    if (
-      conversation.state ===
-      "waiting_quantity"
-    ) {
-      console.log(
-        "[Chatbot] WAITING_QUANTITY"
-      );
-
-      const quantity =
-        extractQuantity(rawText);
-
-      if (!quantity) {
-        return sendMessage(
-          messengerId,
-
-          `দয়া করে ১ থেকে ${MAX_QUANTITY}-এর মধ্যে একটি quantity লিখুন।\n\n` +
-            `উদাহরণ:\n` +
-            `2`
-        );
-      }
-
-      const product =
-        await getConversationProduct(
-          conversation
-        );
-
-      if (!product) {
-        await resetConversation(
-          conversation
-        );
-
-        return sendMessage(
-          messengerId,
-
-          `দুঃখিত 😔\n\n` +
-            `এই productটি এখন পাওয়া যাচ্ছে না।`
-        );
-      }
-
-      const stock =
-        getProductStock(product);
-
-      if (stock < quantity) {
-        return sendMessage(
-          messengerId,
-
-          `দুঃখিত 😊\n\n` +
-            `এই product-এর available stock হলো ${stock} pcs।\n\n` +
-            `আপনি সর্বোচ্চ ${stock} pcs নিতে পারবেন।`
-        );
-      }
-
-      conversation.quantity =
-        quantity;
-
-      conversation.state =
-        "waiting_name";
-
-      await conversation.save();
-
-      return sendMessage(
-        messengerId,
-
-        `ঠিক আছে 😊\n\n` +
-          `Quantity: ${quantity} pcs\n\n` +
-          `এখন আপনার নামটি লিখুন।`
       );
     }
 
@@ -1364,8 +1407,13 @@ export async function handleMessage(
 
       conversation.quantity = 1;
 
+      /* -----------------------------------------------
+         IMPORTANT:
+         Ask quantity first
+      ------------------------------------------------ */
+
       conversation.state =
-        "waiting_name";
+        "waiting_quantity";
 
       await conversation.save();
 
@@ -1380,13 +1428,21 @@ export async function handleMessage(
           `📱 Product:\n` +
           `${product.name}\n\n` +
 
-          `💰 Price:\n` +
+          `💰 Unit Price:\n` +
           `৳${formatPrice(price)}\n\n` +
 
           `📦 Available Stock:\n` +
           `${stock} pcs\n\n` +
 
-          `অর্ডারটি শুরু করতে আপনার নামটি লিখুন।`
+          `🔢 আপনি কতটি নিতে চান?\n\n` +
+
+          `১ থেকে ${Math.min(
+            stock,
+            MAX_QUANTITY
+          )} এর মধ্যে quantity লিখুন।\n\n` +
+
+          `উদাহরণ:\n` +
+          `2`
       );
     }
 
@@ -1663,10 +1719,6 @@ export async function handleMessage(
       "===================================="
     );
 
-    /* =====================================================
-       ERROR RESPONSE TO USER
-    ===================================================== */
-
     try {
       await sendMessage(
         messengerId,
@@ -1676,10 +1728,6 @@ export async function handleMessage(
           `কিছুক্ষণ পরে আবার চেষ্টা করুন।`
       );
     } catch (sendError) {
-      /* ===============================================
-         SEND ERROR RESPONSE FAILED
-      =============================================== */
-
       console.error(
         "❌ FAILED TO SEND ERROR MESSAGE"
       );

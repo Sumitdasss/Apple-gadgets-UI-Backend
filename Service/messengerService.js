@@ -1,8 +1,12 @@
 import axios from "axios";
 
-const API_VERSION = process.env.FACEBOOK_API_VERSION || "v23.0";
+const API_VERSION =
+  process.env.FACEBOOK_API_VERSION || "v26.0";
 
-export default async function sendMessage(recipientId, message) {
+export default async function sendMessage(
+  recipientId,
+  message
+) {
   const PAGE_ACCESS_TOKEN =
     process.env.FACEBOOK_PAGE_ACCESS_TOKEN;
 
@@ -15,7 +19,7 @@ export default async function sendMessage(recipientId, message) {
   console.log("API Version:", API_VERSION);
   console.log(
     "PAGE ACCESS TOKEN EXISTS:",
-    !!PAGE_ACCESS_TOKEN
+    Boolean(PAGE_ACCESS_TOKEN)
   );
   console.log(
     "PAGE ACCESS TOKEN LENGTH:",
@@ -33,11 +37,11 @@ export default async function sendMessage(recipientId, message) {
       GRAPH_URL,
       {
         recipient: {
-          id: recipientId,
+          id: String(recipientId),
         },
         messaging_type: "RESPONSE",
         message: {
-          text: message,
+          text: String(message),
         },
       },
       {
@@ -48,12 +52,11 @@ export default async function sendMessage(recipientId, message) {
     );
 
     console.log(
-      "Facebook Send Success:",
+      "✅ Facebook Send Success:",
       response.data
     );
 
     return response.data;
-
   } catch (error) {
     console.error(
       "========== FACEBOOK SEND ERROR =========="
@@ -74,8 +77,23 @@ export default async function sendMessage(recipientId, message) {
     );
 
     console.error(
-      "Message:",
-      error.message
+      "Facebook Error Message:",
+      error.response?.data?.error?.message
+    );
+
+    console.error(
+      "Facebook Error Type:",
+      error.response?.data?.error?.type
+    );
+
+    console.error(
+      "Facebook Error Code:",
+      error.response?.data?.error?.code
+    );
+
+    console.error(
+      "Facebook Error Subcode:",
+      error.response?.data?.error?.error_subcode
     );
 
     throw error;

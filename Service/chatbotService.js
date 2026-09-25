@@ -1,4 +1,3 @@
-
 import Customer from "../Model/Customer.js";
 import Conversation from "../Model/Conversation.js";
 import Order from "../Model/Order.js";
@@ -24,6 +23,7 @@ const priceFormatter = new Intl.NumberFormat("en-BD");
 const MAX_NAME_LENGTH = 80;
 const MAX_PHONE_LENGTH = 20;
 const MAX_ADDRESS_LENGTH = 500;
+
 const MAX_QUANTITY = 20;
 const MAX_PRODUCT_RESULTS = 10;
 
@@ -77,6 +77,7 @@ function isCancel(text) {
     "না লাগবে",
     "order cancel",
     "অর্ডার বাতিল",
+    "cancel order",
   ]);
 }
 
@@ -122,6 +123,7 @@ function wantsOrder(text) {
     "নিব",
     "নিতে চাই",
     "আমি order করতে চাই",
+    "আমি অর্ডার করতে চাই",
     "কিনব",
     "কিনতে চাই",
     "buy",
@@ -179,7 +181,7 @@ function asksProductInfo(text) {
 }
 
 /* =========================================================
-   PURE INTENT MESSAGE CHECK
+   PURE INTENT CHECK
 ========================================================= */
 
 function isOnlyDetailsRequest(text) {
@@ -285,15 +287,7 @@ async function resetConversation(conversation) {
 }
 
 /* =========================================================
-   PRODUCT PRICE
-========================================================= */
-
-function getProductDisplayPrice(product) {
-  return getProductPrice(product);
-}
-
-/* =========================================================
-   GET CURRENT PRODUCT
+   CURRENT PRODUCT
 ========================================================= */
 
 async function getConversationProduct(conversation) {
@@ -322,7 +316,9 @@ async function saveSelectedProduct(
   }
 
   conversation.product = product._id;
-  conversation.productName = product.name;
+
+  conversation.productName =
+    product.name;
 
   if (
     !conversation.quantity ||
@@ -332,6 +328,14 @@ async function saveSelectedProduct(
   }
 
   await conversation.save();
+}
+
+/* =========================================================
+   PRODUCT PRICE
+========================================================= */
+
+function getProductDisplayPrice(product) {
+  return getProductPrice(product);
 }
 
 /* =========================================================
@@ -366,11 +370,13 @@ function buildProductReply(product) {
     }\n`;
 
   if (product.brand) {
-    reply += `🏷️ Brand: ${product.brand}\n`;
+    reply +=
+      `🏷️ Brand: ${product.brand}\n`;
   }
 
   if (product.sku) {
-    reply += `🔖 SKU: ${product.sku}\n`;
+    reply +=
+      `🔖 SKU: ${product.sku}\n`;
   }
 
   reply +=
@@ -383,38 +389,49 @@ function buildProductReply(product) {
 }
 
 /* =========================================================
-   MULTIPLE PRODUCTS REPLY
+   MULTIPLE PRODUCTS
 ========================================================= */
 
 function buildMultipleProductReply(products) {
-  const limitedProducts = products.slice(
-    0,
-    MAX_PRODUCT_RESULTS
+  const limitedProducts =
+    products.slice(
+      0,
+      MAX_PRODUCT_RESULTS
+    );
+
+  let reply =
+    `📱 Product Found\n\n`;
+
+  limitedProducts.forEach(
+    (product, index) => {
+      const price =
+        getProductPrice(product);
+
+      const stock =
+        getProductStock(product);
+
+      reply +=
+        `${index + 1}. ${product.name}\n` +
+        `💰 Price: ৳${formatPrice(price)}\n` +
+        `📦 Stock: ${
+          stock > 0
+            ? `${stock} pcs`
+            : "Out of Stock"
+        }\n`;
+
+      if (product.brand) {
+        reply +=
+          `🏷️ Brand: ${product.brand}\n`;
+      }
+
+      reply += `\n`;
+    }
   );
 
-  let reply = `📱 Product Found\n\n`;
-
-  limitedProducts.forEach((product, index) => {
-    const price = getProductPrice(product);
-    const stock = getProductStock(product);
-
-    reply +=
-      `${index + 1}. ${product.name}\n` +
-      `💰 Price: ৳${formatPrice(price)}\n` +
-      `📦 Stock: ${
-        stock > 0
-          ? `${stock} pcs`
-          : "Out of Stock"
-      }\n`;
-
-    if (product.brand) {
-      reply += `🏷️ Brand: ${product.brand}\n`;
-    }
-
-    reply += `\n`;
-  });
-
-  if (products.length > MAX_PRODUCT_RESULTS) {
+  if (
+    products.length >
+    MAX_PRODUCT_RESULTS
+  ) {
     reply +=
       `আরও product আছে। নির্দিষ্ট product-এর নাম লিখুন।\n\n`;
   }
@@ -426,12 +443,15 @@ function buildMultipleProductReply(products) {
 }
 
 /* =========================================================
-   PRODUCT DETAILS REPLY
+   PRODUCT DETAILS
 ========================================================= */
 
 function buildProductDetailsReply(product) {
-  const price = getProductPrice(product);
-  const stock = getProductStock(product);
+  const price =
+    getProductPrice(product);
+
+  const stock =
+    getProductStock(product);
 
   let reply =
     `📱 ${product.name}\n\n` +
@@ -440,7 +460,8 @@ function buildProductDetailsReply(product) {
   if (
     product.discountPrice &&
     product.price &&
-    product.discountPrice < product.price
+    product.discountPrice <
+      product.price
   ) {
     reply +=
       `🏷️ Regular Price: ৳${formatPrice(
@@ -456,11 +477,13 @@ function buildProductDetailsReply(product) {
     }\n`;
 
   if (product.brand) {
-    reply += `🏷️ Brand: ${product.brand}\n`;
+    reply +=
+      `🏷️ Brand: ${product.brand}\n`;
   }
 
   if (product.sku) {
-    reply += `🔖 SKU: ${product.sku}\n`;
+    reply +=
+      `🔖 SKU: ${product.sku}\n`;
   }
 
   const description =
@@ -475,46 +498,60 @@ function buildProductDetailsReply(product) {
     getProductSpecifications(product);
 
   if (specifications) {
-    reply += `\n⚙️ Specifications:\n`;
+    reply +=
+      `\n⚙️ Specifications:\n`;
 
     if (
-      typeof specifications === "object" &&
+      typeof specifications ===
+        "object" &&
       !Array.isArray(specifications)
     ) {
-      Object.entries(specifications).forEach(
+      Object.entries(
+        specifications
+      ).forEach(
         ([key, value]) => {
           reply +=
             `• ${key}: ${value}\n`;
         }
       );
-    } else if (Array.isArray(specifications)) {
-      specifications.forEach((item) => {
-        if (
-          item &&
-          typeof item === "object"
-        ) {
-          const key =
-            item.key ||
-            item.name ||
-            item.title;
+    } else if (
+      Array.isArray(specifications)
+    ) {
+      specifications.forEach(
+        (item) => {
+          if (
+            item &&
+            typeof item ===
+              "object"
+          ) {
+            const key =
+              item.key ||
+              item.name ||
+              item.title;
 
-          const value =
-            item.value ||
-            item.description ||
-            "";
+            const value =
+              item.value ||
+              item.description ||
+              "";
 
-          if (key) {
-            reply += `• ${key}: ${value}\n`;
+            if (key) {
+              reply +=
+                `• ${key}: ${value}\n`;
+            } else {
+              reply +=
+                `• ${JSON.stringify(
+                  item
+                )}\n`;
+            }
           } else {
             reply +=
-              `• ${JSON.stringify(item)}\n`;
+              `• ${item}\n`;
           }
-        } else {
-          reply += `• ${item}\n`;
         }
-      });
+      );
     } else {
-      reply += `${specifications}\n`;
+      reply +=
+        `${specifications}\n`;
     }
   }
 
@@ -537,27 +574,38 @@ function buildOrderSummary({
   const price =
     getProductDisplayPrice(product);
 
-  const total = price * quantity;
+  const total =
+    price * quantity;
 
   return (
     `🧾 Order Summary\n\n` +
+
     `📱 Product:\n` +
     `${product.name}\n\n` +
+
     `🔢 Quantity:\n` +
     `${quantity}\n\n` +
+
     `💰 Unit Price:\n` +
     `৳${formatPrice(price)}\n\n` +
+
     `💵 Total:\n` +
     `৳${formatPrice(total)}\n\n` +
+
     `👤 Name:\n` +
     `${customer.name || ""}\n\n` +
+
     `📞 Phone:\n` +
     `${customer.phone || ""}\n\n` +
+
     `📍 Delivery Address:\n` +
     `${customer.address || ""}\n\n` +
+
     `-------------------------\n\n` +
+
     `অর্ডারটি confirm করতে লিখুন:\n` +
     `YES\n\n` +
+
     `অথবা বাতিল করতে লিখুন:\n` +
     `NO`
   );
@@ -568,7 +616,8 @@ function buildOrderSummary({
 ========================================================= */
 
 function isValidName(name) {
-  const value = String(name || "").trim();
+  const value =
+    String(name || "").trim();
 
   if (!value) {
     return false;
@@ -578,7 +627,10 @@ function isValidName(name) {
     return false;
   }
 
-  if (value.length > MAX_NAME_LENGTH) {
+  if (
+    value.length >
+    MAX_NAME_LENGTH
+  ) {
     return false;
   }
 
@@ -596,7 +648,8 @@ function normalizePhone(phone) {
 }
 
 function isValidPhone(phone) {
-  const value = normalizePhone(phone);
+  const value =
+    normalizePhone(phone);
 
   const bdPhoneRegex =
     /^(?:\+?880|0)1[3-9]\d{8}$/;
@@ -609,17 +662,22 @@ function isValidPhone(phone) {
 ========================================================= */
 
 function extractQuantity(text) {
-  const value = normalize(text);
+  const value =
+    normalize(text);
 
-  const match = value.match(/\d+/);
+  const match =
+    value.match(/\d+/);
 
   if (!match) {
     return null;
   }
 
-  const quantity = Number(match[0]);
+  const quantity =
+    Number(match[0]);
 
-  if (!Number.isInteger(quantity)) {
+  if (
+    !Number.isInteger(quantity)
+  ) {
     return null;
   }
 
@@ -653,8 +711,11 @@ export async function handleMessage(
       return;
     }
 
-    const rawText = message.trim();
-    const text = normalize(rawText);
+    const rawText =
+      message.trim();
+
+    const text =
+      normalize(rawText);
 
     console.log(
       "===================================="
@@ -684,7 +745,9 @@ export async function handleMessage(
     console.log(
       "[Chatbot Selected Product]:",
       conversation.product
-        ? String(conversation.product)
+        ? String(
+            conversation.product
+          )
         : "NONE"
     );
 
@@ -693,7 +756,8 @@ export async function handleMessage(
     ===================================================== */
 
     if (
-      conversation.state !== "idle" &&
+      conversation.state !==
+        "idle" &&
       isCancel(text)
     ) {
       await resetConversation(
@@ -710,27 +774,24 @@ export async function handleMessage(
     }
 
     /* =====================================================
-       1. WAITING QUANTITY
+       WAITING QUANTITY
     ===================================================== */
 
     if (
       conversation.state ===
       "waiting_quantity"
     ) {
-      console.log(
-        "[Chatbot] WAITING_QUANTITY"
-      );
-
       const quantity =
-        extractQuantity(rawText);
+        extractQuantity(
+          rawText
+        );
 
       if (!quantity) {
         return sendMessage(
           messengerId,
 
           `দয়া করে ১ থেকে ${MAX_QUANTITY}-এর মধ্যে একটি quantity লিখুন। 😊\n\n` +
-            `উদাহরণ:\n` +
-            `2`
+            `উদাহরণ:\n2`
         );
       }
 
@@ -768,7 +829,9 @@ export async function handleMessage(
         );
       }
 
-      if (quantity > stock) {
+      if (
+        quantity > stock
+      ) {
         return sendMessage(
           messengerId,
 
@@ -781,10 +844,6 @@ export async function handleMessage(
             `আবার quantity লিখুন।`
         );
       }
-
-      /* -----------------------------------------------
-         SAVE QUANTITY
-      ------------------------------------------------ */
 
       conversation.quantity =
         quantity;
@@ -825,29 +884,27 @@ export async function handleMessage(
     }
 
     /* =====================================================
-       2. WAITING NAME
+       WAITING NAME
     ===================================================== */
 
     if (
       conversation.state ===
       "waiting_name"
     ) {
-      console.log(
-        "[Chatbot] WAITING_NAME"
-      );
-
-      if (!isValidName(rawText)) {
+      if (
+        !isValidName(rawText)
+      ) {
         return sendMessage(
           messengerId,
 
           `দুঃখিত 😊\n\n` +
             `আপনার নামটি একটু পরিষ্কারভাবে লিখুন।\n\n` +
-            `উদাহরণ:\n` +
-            `Sumit Das`
+            `উদাহরণ:\nSumit Das`
         );
       }
 
-      customer.name = rawText;
+      customer.name =
+        rawText;
 
       conversation.state =
         "waiting_phone";
@@ -860,25 +917,22 @@ export async function handleMessage(
 
         `ধন্যবাদ, ${customer.name} 😊\n\n` +
           `এখন আপনার মোবাইল নম্বরটি দিন।\n\n` +
-          `উদাহরণ:\n` +
-          `01712345678`
+          `উদাহরণ:\n01712345678`
       );
     }
 
     /* =====================================================
-       3. WAITING PHONE
+       WAITING PHONE
     ===================================================== */
 
     if (
       conversation.state ===
       "waiting_phone"
     ) {
-      console.log(
-        "[Chatbot] WAITING_PHONE"
-      );
-
       const phone =
-        normalizePhone(rawText);
+        normalizePhone(
+          rawText
+        );
 
       if (
         phone.length >
@@ -890,12 +944,12 @@ export async function handleMessage(
 
           `দুঃখিত 😊\n\n` +
             `একটি সঠিক বাংলাদেশি মোবাইল নম্বর দিন।\n\n` +
-            `উদাহরণ:\n` +
-            `01712345678`
+            `উদাহরণ:\n01712345678`
         );
       }
 
-      customer.phone = phone;
+      customer.phone =
+        phone;
 
       conversation.state =
         "waiting_address";
@@ -914,17 +968,13 @@ export async function handleMessage(
     }
 
     /* =====================================================
-       4. WAITING ADDRESS
+       WAITING ADDRESS
     ===================================================== */
 
     if (
       conversation.state ===
       "waiting_address"
     ) {
-      console.log(
-        "[Chatbot] WAITING_ADDRESS"
-      );
-
       if (
         rawText.length < 5 ||
         rawText.length >
@@ -939,7 +989,8 @@ export async function handleMessage(
         );
       }
 
-      customer.address = rawText;
+      customer.address =
+        rawText;
 
       const product =
         await getConversationProduct(
@@ -961,13 +1012,16 @@ export async function handleMessage(
 
       const quantity =
         Number(
-          conversation.quantity || 1
+          conversation.quantity ||
+            1
         );
 
       const stock =
         getProductStock(product);
 
-      if (stock < quantity) {
+      if (
+        stock < quantity
+      ) {
         await resetConversation(
           conversation
         );
@@ -1000,18 +1054,16 @@ export async function handleMessage(
     }
 
     /* =====================================================
-       5. WAITING CONFIRMATION
+       WAITING CONFIRMATION
     ===================================================== */
 
     if (
       conversation.state ===
       "waiting_confirmation"
     ) {
-      console.log(
-        "[Chatbot] WAITING_CONFIRMATION"
-      );
-
-      if (isConfirmation(text)) {
+      if (
+        isConfirmation(text)
+      ) {
         const product =
           await getConversationProduct(
             conversation
@@ -1035,10 +1087,13 @@ export async function handleMessage(
 
         const quantity =
           Number(
-            conversation.quantity || 1
+            conversation.quantity ||
+              1
           );
 
-        if (stock < quantity) {
+        if (
+          stock < quantity
+        ) {
           await resetConversation(
             conversation
           );
@@ -1111,9 +1166,9 @@ export async function handleMessage(
           order.orderId
         );
 
-        /* ===============================================
+        /* -----------------------------------------------
            DECREASE STOCK
-        =============================================== */
+        ------------------------------------------------ */
 
         product.stock =
           Math.max(
@@ -1154,7 +1209,9 @@ export async function handleMessage(
       }
 
       if (
-        isNegativeConfirmation(text)
+        isNegativeConfirmation(
+          text
+        )
       ) {
         await resetConversation(
           conversation
@@ -1181,10 +1238,12 @@ export async function handleMessage(
     }
 
     /* =====================================================
-       6. GREETING
+       GREETING
     ===================================================== */
 
-    if (isGreeting(text)) {
+    if (
+      isGreeting(text)
+    ) {
       return sendMessage(
         messengerId,
 
@@ -1202,11 +1261,13 @@ export async function handleMessage(
     }
 
     /* =====================================================
-       7. DETAILS OF SELECTED PRODUCT
+       DETAILS OF SELECTED PRODUCT
     ===================================================== */
 
     if (
-      isOnlyDetailsRequest(text)
+      isOnlyDetailsRequest(
+        text
+      )
     ) {
       const currentProduct =
         await getConversationProduct(
@@ -1235,11 +1296,13 @@ export async function handleMessage(
     }
 
     /* =====================================================
-       8. PRICE OF SELECTED PRODUCT
+       PRICE OF SELECTED PRODUCT
     ===================================================== */
 
     if (
-      isOnlyPriceRequest(text)
+      isOnlyPriceRequest(
+        text
+      )
     ) {
       const currentProduct =
         await getConversationProduct(
@@ -1283,11 +1346,13 @@ export async function handleMessage(
     }
 
     /* =====================================================
-       9. STOCK OF SELECTED PRODUCT
+       STOCK OF SELECTED PRODUCT
     ===================================================== */
 
     if (
-      isOnlyStockRequest(text)
+      isOnlyStockRequest(
+        text
+      )
     ) {
       const currentProduct =
         await getConversationProduct(
@@ -1324,21 +1389,23 @@ export async function handleMessage(
     }
 
     /* =====================================================
-       10. ORDER INTENT
+       ORDER INTENT
     ===================================================== */
 
-    if (wantsOrder(text)) {
+    if (
+      wantsOrder(text)
+    ) {
       console.log(
         "[Chatbot] ORDER INTENT"
       );
 
       let product = null;
 
-      /* -----------------------------------------------
-         Existing selected product
-      ------------------------------------------------ */
+      /* Existing selected product */
 
-      if (conversation.product) {
+      if (
+        conversation.product
+      ) {
         product =
           await getConversationProduct(
             conversation
@@ -1346,13 +1413,12 @@ export async function handleMessage(
 
         console.log(
           "[Order] Existing product:",
-          product?.name || "NOT FOUND"
+          product?.name ||
+            "NOT FOUND"
         );
       }
 
-      /* -----------------------------------------------
-         Search product from message
-      ------------------------------------------------ */
+      /* Search product */
 
       if (!product) {
         product =
@@ -1362,13 +1428,12 @@ export async function handleMessage(
 
         console.log(
           "[Order] Search product:",
-          product?.name || "NOT FOUND"
+          product?.name ||
+            "NOT FOUND"
         );
       }
 
-      /* -----------------------------------------------
-         Product not found
-      ------------------------------------------------ */
+      /* Product not found */
 
       if (!product) {
         return sendMessage(
@@ -1395,9 +1460,7 @@ export async function handleMessage(
         );
       }
 
-      /* -----------------------------------------------
-         Save selected product
-      ------------------------------------------------ */
+      /* Save product */
 
       conversation.product =
         product._id;
@@ -1405,12 +1468,8 @@ export async function handleMessage(
       conversation.productName =
         product.name;
 
-      conversation.quantity = 1;
-
-      /* -----------------------------------------------
-         IMPORTANT:
-         Ask quantity first
-      ------------------------------------------------ */
+      conversation.quantity =
+        1;
 
       conversation.state =
         "waiting_quantity";
@@ -1441,13 +1500,12 @@ export async function handleMessage(
             MAX_QUANTITY
           )} এর মধ্যে quantity লিখুন।\n\n` +
 
-          `উদাহরণ:\n` +
-          `2`
+          `উদাহরণ:\n2`
       );
     }
 
     /* =====================================================
-       11. PRODUCT SEARCH
+       PRODUCT SEARCH
     ===================================================== */
 
     console.log(
@@ -1462,23 +1520,27 @@ export async function handleMessage(
 
     console.log(
       "[Chatbot] Products Found:",
-      products.map((p) => ({
-        id: p?._id,
-        name: p?.name,
-        price: p?.price,
-        discountPrice:
-          p?.discountPrice,
-        stock: p?.stock,
-        isActive:
-          p?.isActive,
-      }))
+      products.map(
+        (p) => ({
+          id: p?._id,
+          name: p?.name,
+          price: p?.price,
+          discountPrice:
+            p?.discountPrice,
+          stock: p?.stock,
+          isActive:
+            p?.isActive,
+        })
+      )
     );
 
     /* =====================================================
-       12. SINGLE PRODUCT
+       SINGLE PRODUCT
     ===================================================== */
 
-    if (products.length === 1) {
+    if (
+      products.length === 1
+    ) {
       const product =
         products[0];
 
@@ -1492,7 +1554,9 @@ export async function handleMessage(
         product.name
       );
 
-      if (asksProductInfo(text)) {
+      if (
+        asksProductInfo(text)
+      ) {
         return sendMessage(
           messengerId,
 
@@ -1502,9 +1566,13 @@ export async function handleMessage(
         );
       }
 
-      if (asksStock(text)) {
+      if (
+        asksStock(text)
+      ) {
         const stock =
-          getProductStock(product);
+          getProductStock(
+            product
+          );
 
         return sendMessage(
           messengerId,
@@ -1518,12 +1586,18 @@ export async function handleMessage(
         );
       }
 
-      if (asksPrice(text)) {
+      if (
+        asksPrice(text)
+      ) {
         const price =
-          getProductPrice(product);
+          getProductPrice(
+            product
+          );
 
         const stock =
-          getProductStock(product);
+          getProductStock(
+            product
+          );
 
         return sendMessage(
           messengerId,
@@ -1543,12 +1617,14 @@ export async function handleMessage(
       return sendMessage(
         messengerId,
 
-        buildProductReply(product)
+        buildProductReply(
+          product
+        )
       );
     }
 
     /* =====================================================
-       13. MULTIPLE PRODUCTS
+       MULTIPLE PRODUCTS
     ===================================================== */
 
     if (
@@ -1564,10 +1640,12 @@ export async function handleMessage(
     }
 
     /* =====================================================
-       14. PRICE WITHOUT PRODUCT
+       PRICE WITHOUT PRODUCT
     ===================================================== */
 
-    if (asksPrice(text)) {
+    if (
+      asksPrice(text)
+    ) {
       return sendMessage(
         messengerId,
 
@@ -1581,10 +1659,12 @@ export async function handleMessage(
     }
 
     /* =====================================================
-       15. STOCK WITHOUT PRODUCT
+       STOCK WITHOUT PRODUCT
     ===================================================== */
 
-    if (asksStock(text)) {
+    if (
+      asksStock(text)
+    ) {
       return sendMessage(
         messengerId,
 
@@ -1597,10 +1677,12 @@ export async function handleMessage(
     }
 
     /* =====================================================
-       16. INFO WITHOUT PRODUCT
+       INFO WITHOUT PRODUCT
     ===================================================== */
 
-    if (asksProductInfo(text)) {
+    if (
+      asksProductInfo(text)
+    ) {
       return sendMessage(
         messengerId,
 
@@ -1613,7 +1695,7 @@ export async function handleMessage(
     }
 
     /* =====================================================
-       17. THANK YOU
+       THANK YOU
     ===================================================== */
 
     if (
@@ -1633,7 +1715,7 @@ export async function handleMessage(
     }
 
     /* =====================================================
-       18. BYE
+       BYE
     ===================================================== */
 
     if (
@@ -1653,8 +1735,7 @@ export async function handleMessage(
     }
 
     /* =====================================================
-       19. FINAL FALLBACK
-       NO OPENAI
+       FINAL FALLBACK
     ===================================================== */
 
     return sendMessage(
@@ -1674,7 +1755,8 @@ export async function handleMessage(
     );
   } catch (error) {
     /* =====================================================
-       MAIN CHATBOT ERROR
+       SAFE ERROR LOG
+       NEVER LOG FULL AXIOS ERROR
     ===================================================== */
 
     console.error(
@@ -1705,19 +1787,27 @@ export async function handleMessage(
       error?.message
     );
 
-    console.error(
-      "Stack:",
-      error?.stack
-    );
+    /*
+      IMPORTANT:
 
-    console.error(
-      "Full Error:",
-      error
-    );
+      Do NOT use:
+
+      console.error(error);
+      console.error("Full Error:", error);
+      console.error(error.config);
+      console.error(error.response);
+      console.log(process.env.FACEBOOK_PAGE_ACCESS_TOKEN);
+
+      These can expose sensitive Facebook credentials.
+    */
 
     console.error(
       "===================================="
     );
+
+    /* =====================================================
+       SAFE ERROR MESSAGE TO CUSTOMER
+    ===================================================== */
 
     try {
       await sendMessage(
@@ -1728,23 +1818,19 @@ export async function handleMessage(
           `কিছুক্ষণ পরে আবার চেষ্টা করুন।`
       );
     } catch (sendError) {
-      console.error(
-        "❌ FAILED TO SEND ERROR MESSAGE"
-      );
+      /*
+        Only log safe information.
+        Never log the complete Axios error.
+      */
 
       console.error(
-        "Send Error Name:",
+        "[Send Error Name]:",
         sendError?.name
       );
 
       console.error(
-        "Send Error Message:",
+        "[Send Error Message]:",
         sendError?.message
-      );
-
-      console.error(
-        "Send Error Stack:",
-        sendError?.stack
       );
     }
   }
@@ -1757,4 +1843,3 @@ export async function handleMessage(
 export default {
   handleMessage,
 };
-

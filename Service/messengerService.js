@@ -39,62 +39,64 @@ export default async function sendMessage(
         recipient: {
           id: String(recipientId),
         },
+
         messaging_type: "RESPONSE",
+
         message: {
           text: String(message),
         },
       },
       {
-        params: {
-          access_token: PAGE_ACCESS_TOKEN,
+        headers: {
+          Authorization: `Bearer ${PAGE_ACCESS_TOKEN}`,
+          "Content-Type": "application/json",
         },
       }
     );
 
     console.log(
-      "✅ Facebook Send Success:",
+      "Facebook Send Success:",
       response.data
     );
 
     return response.data;
+
   } catch (error) {
+    const fbError =
+      error?.response?.data?.error;
+
     console.error(
       "========== FACEBOOK SEND ERROR =========="
     );
 
     console.error(
       "Status:",
-      error.response?.status
-    );
-
-    console.error(
-      "Facebook Error:",
-      JSON.stringify(
-        error.response?.data,
-        null,
-        2
-      )
+      error?.response?.status
     );
 
     console.error(
       "Facebook Error Message:",
-      error.response?.data?.error?.message
+      fbError?.message
     );
 
     console.error(
       "Facebook Error Type:",
-      error.response?.data?.error?.type
+      fbError?.type
     );
 
     console.error(
       "Facebook Error Code:",
-      error.response?.data?.error?.code
+      fbError?.code
     );
 
     console.error(
       "Facebook Error Subcode:",
-      error.response?.data?.error?.error_subcode
+      fbError?.error_subcode
     );
+
+    // IMPORTANT:
+    // Never log the full Axios error.
+    // It may contain the Facebook access token.
 
     throw error;
   }

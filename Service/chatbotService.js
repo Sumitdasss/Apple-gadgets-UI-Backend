@@ -2,290 +2,1023 @@ import Customer from "../Model/Customer.js";
 import Conversation from "../Model/Conversation.js";
 import Order from "../Model/Order.js";
 
-import { searchProduct, getProductPrice } from "./productService.js";
-import  sendMessage  from "./messengerService.js";
+import {
+  searchProduct,
+  getProductPrice,
+} from "./productService.js";
 
-// Intl Formatter রি-ইউজ করার জন্য ক্যাশ করা হলো (বারবার নতুন অবজেক্ট তৈরি হবে না)
+import sendMessage from "./messengerService.js";
+
+/* =========================================================
+   CONFIG
+========================================================= */
+
 const priceFormatter = new Intl.NumberFormat("en-BD");
 
+const MAX_NAME_LENGTH = 80;
+const MAX_PHONE_LENGTH = 20;
+const MAX_ADDRESS_LENGTH = 500;
+const MAX_QUANTITY = 20;
+
+
+/* =========================================================
+   HELPERS
+========================================================= */
+
 function formatPrice(price) {
-  return priceFormatter.format(price || 0);
+  return priceFormatter.format(Number(price) || 0);
 }
+
 
 function normalize(text) {
-  return text ? text.toLowerCase().trim() : "";
+  return String(text || "")
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, " ");
 }
 
-// দ্রুত স্ট্রিং ম্যাচিং করার জন্য Regex Helpers
-function containsAny(text, words) {
-  const pattern = new RegExp(words.join("|"), "i");
-  return pattern.test(text);
+
+function containsAny(text, words = []) {
+  const normalizedText = normalize(text);
+
+  return words.some((word) =>
+    normalizedText.includes(normalize(word))
+  );
 }
 
-// Customer এবং Conversation একসাথে প্যারালালে হ্যান্ডেল করার ফাংশন
-async function getCustomerAndConversation(messengerId) {
-  const [customer, conversation] = await Promise.all([
-    Customer.findOne({ messengerId }),
-    Conversation.findOne({ messengerId }),
+
+/* =========================================================
+   INTENT HELPERS
+========================================================= */
+
+function isGreeting(text) {
+  return containsAny(text, [
+    "hi",
+    "hello",
+    "hey",
+    "হাই",
+    "হ্যালো",
+    "আসসালামু",
+    "আসসালামু আলাইকুম",
+    "salam",
+    "assalamualaikum",
   ]);
-
-  let activeCustomer = customer;
-  if (!activeCustomer) {
-    activeCustomer = await Customer.create({
-      messengerId,
-      source: "facebook_messenger",
-    });
-  }
-
-  let activeConversation = conversation;
-  if (!activeConversation) {
-    activeConversation = await Conversation.create({
-      messengerId,
-      customer: activeCustomer._id,
-      state: "idle",
-    });
-  }
-
-  return { customer: activeCustomer, conversation: activeConversation };
 }
 
-export async function handleMessage(messengerId, message) {
-  if (!message || !message.trim()) return;
 
-  const rawText = message.trim();
-  const text = normalize(rawText);
+function isCancel(text) {
+  return containsAny(text, [
+    "cancel",
+    "বাতিল",
+    "বাদ",
+    "থাক",
+    "না লাগবে",
+    "order cancel",
+  ]);
+}
 
-  // প্যারালালে কাস্টমার ও কনভারসেশন ফেচ
-  const { customer, conversation } = await getCustomerAndConversation(messengerId);
 
-  // ======================================
-  // ORDER FLOW
-  // ======================================
+function isConfirmation(text) {
+  const value = normalize(text);
 
-  if (conversation.state === "waiting_name") {
-    customer.name = rawText;
-    conversation.state = "waiting_phone";
+  return [
+    "yes",
+    "হ্যাঁ",
+    "হ্যা",
+    "জি",
+    "জ্বি",
+    "confirm",
+    "confirmed",
+    "ঠিক আছে",
+    "অর্ডার করুন",
+    "নিশ্চিত",
+    "নিশ্চিত করুন",
+  ].includes(value);
+}
 
-    await Promise.all([customer.save(), conversation.save()]);
 
-    return sendMessage(
-      messengerId,
-      `ধন্যবাদ ${customer.name} 😊\n\nএখন আপনার মোবাইল নম্বরটি দিন।`
-    );
-  }
+function isNegativeConfirmation(text) {
+  const value = normalize(text);
 
-  if (conversation.state === "waiting_phone") {
-    customer.phone = rawText;
-    conversation.state = "waiting_address";
+  return [
+    "no",
+    "না",
+    "cancel",
+    "বাতিল",
+    "বাদ",
+  ].includes(value);
+}
 
-    await Promise.all([customer.save(), conversation.save()]);
 
-    return sendMessage(
-      messengerId,
-      `ধন্যবাদ 😊\n\nএখন আপনার সম্পূর্ণ delivery address দিন।`
-    );
-  }
-
-  if (conversation.state === "waiting_address") {
-    customer.address = rawText;
-    conversation.state = "waiting_confirmation";
-
-    const [product] = await Promise.all([
-      searchProduct(conversation.productName),
-      customer.save(),
-      conversation.save(),
-    ]);
-
-    const price = product ? getProductPrice(product) : 0;
-    const quantity = conversation.quantity || 1;
-    const total = price * quantity;
-
-    return sendMessage(
-      messengerId,
-      `📦 Order Summary\n\nProduct:\n${conversation.productName}\n\nQuantity:\n${quantity}\n\nPrice:\n৳${formatPrice(
-        total
-      )}\n\nName:\n${customer.name}\n\nPhone:\n${
-        customer.phone
-      }\n\nAddress:\n${customer.address}\n\nঅর্ডার confirm করতে লিখুন:\n\nYES\n\nঅথবা বাতিল করতে লিখুন:\n\nNO`
-    );
-  }
-
-  if (conversation.state === "waiting_confirmation") {
-    const isYes = ["yes", "হ্যাঁ", "জি", "confirm"].includes(text);
-    const isNo = ["no", "না", "cancel"].includes(text);
-
-    if (isYes) {
-      const product = await searchProduct(conversation.productName);
-
-      if (!product) {
-        conversation.state = "idle";
-        await conversation.save();
-
-        return sendMessage(
-          messengerId,
-          "দুঃখিত, productটি এখন খুঁজে পাওয়া যাচ্ছে না।"
-        );
-      }
-
-      const price = getProductPrice(product);
-      const quantity = conversation.quantity || 1;
-      const total = price * quantity;
-      const orderId = `ORD-${Date.now()}`;
-
-      // অর্ডার তৈরি এবং কনভারসেশন স্টেট ক্লিয়ার একসাথে করা হচ্ছে
-      const orderPromise = Order.create({
-        orderId,
-        customer: customer._id,
-        products: [
-          {
-            product: product._id,
-            name: product.name,
-            price,
-            quantity,
-            color: conversation.color || "",
-            size: conversation.size || "",
-          },
-        ],
-        totalAmount: total,
-        deliveryAddress: customer.address,
-        phone: customer.phone,
-        status: "pending",
-        source: "facebook_messenger",
-      });
-
-      conversation.state = "idle";
-      conversation.temporaryOrder = {};
-
-      const [order] = await Promise.all([orderPromise, conversation.save()]);
-
-      return sendMessage(
-        messengerId,
-        `✅ আপনার Order সফলভাবে নেওয়া হয়েছে।\n\nOrder ID:\n#${
-          order.orderId
-        }\n\nProduct:\n${product.name}\n\nTotal:\n৳${formatPrice(
-          total
-        )}\n\nআমাদের team খুব শীঘ্রই আপনার সাথে যোগাযোগ করবে। ❤️`
-      );
-    }
-
-    if (isNo) {
-      conversation.state = "idle";
-      await conversation.save();
-
-      return sendMessage(
-        messengerId,
-        "ঠিক আছে 😊 Order বাতিল করা হয়েছে।"
-      );
-    }
-
-    return sendMessage(
-      messengerId,
-      "Order confirm করতে YES অথবা cancel করতে NO লিখুন।"
-    );
-  }
-
-  // ======================================
-  // GREETING
-  // ======================================
-
-  if (containsAny(text, ["hi", "hello", "hey", "হাই", "হ্যালো", "আসসালামু", "salam"])) {
-    return sendMessage(
-      messengerId,
-      `Assalamu Alaikum 😊\n\nWelcome to our store.\n\nআমি আপনাকে product price, stock এবং order করতে সাহায্য করতে পারি।\n\নআপনি কোন product খুঁজছেন?`
-    );
-  }
-
-  // ======================================
-  // ORDER INTENT
-  // ======================================
-
-  const wantsOrder = containsAny(text, [
+function wantsOrder(text) {
+  return containsAny(text, [
     "order",
     "অর্ডার",
     "নিব",
     "নিতে চাই",
     "কিনব",
+    "কিনতে চাই",
     "buy",
+    "purchase",
   ]);
+}
 
-  if (wantsOrder) {
-    const product = await searchProduct(rawText);
 
-    if (product) {
-      conversation.product = product._id;
-      conversation.productName = product.name;
-      conversation.quantity = 1;
-      conversation.state = "waiting_name";
+function asksPrice(text) {
+  return containsAny(text, [
+    "price",
+    "দাম",
+    "কত",
+    "মূল্য",
+    "টাকা",
+    "cost",
+  ]);
+}
 
-      await conversation.save();
 
-      const price = getProductPrice(product);
+function asksStock(text) {
+  return containsAny(text, [
+    "stock",
+    "available",
+    "availability",
+    "আছে",
+    "অ্যাভেইলেবল",
+    "স্টক",
+    "মজুদ",
+  ]);
+}
+
+
+function asksProductInfo(text) {
+  return containsAny(text, [
+    "details",
+    "detail",
+    "information",
+    "info",
+    "specification",
+    "specs",
+    "বিস্তারিত",
+    "তথ্য",
+    "ফিচার",
+    "স্পেসিফিকেশন",
+  ]);
+}
+
+
+/* =========================================================
+   CUSTOMER + CONVERSATION
+========================================================= */
+
+async function getCustomerAndConversation(messengerId) {
+  let customer = await Customer.findOne({
+    messengerId,
+  });
+
+  if (!customer) {
+    customer = await Customer.create({
+      messengerId,
+      source: "facebook_messenger",
+    });
+  }
+
+  let conversation = await Conversation.findOne({
+    messengerId,
+  });
+
+  if (!conversation) {
+    conversation = await Conversation.create({
+      messengerId,
+      customer: customer._id,
+      state: "idle",
+    });
+  }
+
+  return {
+    customer,
+    conversation,
+  };
+}
+
+
+/* =========================================================
+   RESET CONVERSATION
+========================================================= */
+
+async function resetConversation(conversation) {
+  conversation.state = "idle";
+
+  conversation.product = null;
+  conversation.productName = "";
+  conversation.quantity = 1;
+  conversation.color = "";
+  conversation.size = "";
+  conversation.temporaryOrder = {};
+
+  await conversation.save();
+}
+
+
+/* =========================================================
+   PRODUCT PRICE
+========================================================= */
+
+function getProductDisplayPrice(product) {
+  return getProductPrice(product);
+}
+
+
+/* =========================================================
+   PRODUCT REPLY
+========================================================= */
+
+function buildProductReply(product) {
+  const price = getProductDisplayPrice(product);
+
+  const stock = Number(product.stock || 0);
+
+  let reply =
+    `📱 ${product.name}\n\n` +
+    `💰 Price: ৳${formatPrice(price)}\n`;
+
+  if (
+    product.discountPrice &&
+    product.discountPrice > 0 &&
+    product.price &&
+    product.discountPrice < product.price
+  ) {
+    reply +=
+      `🏷️ Regular Price: ৳${formatPrice(product.price)}\n`;
+  }
+
+  reply +=
+    `📦 Stock: ${
+      stock > 0
+        ? `Available (${stock} pcs)`
+        : "Out of Stock"
+    }\n`;
+
+  if (product.brand) {
+    reply += `🏷️ Brand: ${product.brand}\n`;
+  }
+
+  reply +=
+    `\nআপনি চাইলে এখনই অর্ডার করতে পারেন। 😊\n\n` +
+    `লিখুন: "আমি অর্ডার করতে চাই"`;
+
+  return reply;
+}
+
+
+/* =========================================================
+   ORDER SUMMARY
+========================================================= */
+
+function buildOrderSummary({
+  product,
+  quantity,
+  customer,
+}) {
+  const price = getProductDisplayPrice(product);
+
+  const total = price * quantity;
+
+  return (
+    `🧾 Order Summary\n\n` +
+
+    `📱 Product:\n` +
+    `${product.name}\n\n` +
+
+    `🔢 Quantity:\n` +
+    `${quantity}\n\n` +
+
+    `💰 Unit Price:\n` +
+    `৳${formatPrice(price)}\n\n` +
+
+    `💵 Total:\n` +
+    `৳${formatPrice(total)}\n\n` +
+
+    `👤 Name:\n` +
+    `${customer.name}\n\n` +
+
+    `📞 Phone:\n` +
+    `${customer.phone}\n\n` +
+
+    `📍 Delivery Address:\n` +
+    `${customer.address}\n\n` +
+
+    `-------------------------\n\n` +
+
+    `অর্ডারটি confirm করতে লিখুন:\n` +
+    `YES\n\n` +
+
+    `অথবা বাতিল করতে লিখুন:\n` +
+    `NO`
+  );
+}
+
+
+/* =========================================================
+   NAME VALIDATION
+========================================================= */
+
+function isValidName(name) {
+  const value = String(name || "").trim();
+
+  if (!value) return false;
+
+  if (value.length < 2) return false;
+
+  if (value.length > MAX_NAME_LENGTH) return false;
+
+  return true;
+}
+
+
+/* =========================================================
+   PHONE VALIDATION
+========================================================= */
+
+function normalizePhone(phone) {
+  return String(phone || "")
+    .replace(/[^\d+]/g, "")
+    .trim();
+}
+
+
+function isValidPhone(phone) {
+  const value = normalizePhone(phone);
+
+  /*
+    Bangladesh examples:
+
+    01712345678
+    +8801712345678
+    8801712345678
+  */
+
+  const bdPhoneRegex =
+    /^(?:\+?880|0)1[3-9]\d{8}$/;
+
+  return bdPhoneRegex.test(value);
+}
+
+
+/* =========================================================
+   QUANTITY PARSER
+========================================================= */
+
+function extractQuantity(text) {
+  const value = normalize(text);
+
+  const match = value.match(/\d+/);
+
+  if (!match) return null;
+
+  const quantity = Number(match[0]);
+
+  if (!Number.isInteger(quantity)) {
+    return null;
+  }
+
+  if (quantity < 1 || quantity > MAX_QUANTITY) {
+    return null;
+  }
+
+  return quantity;
+}
+
+
+/* =========================================================
+   MAIN CHATBOT
+========================================================= */
+
+export async function handleMessage(
+  messengerId,
+  message
+) {
+  try {
+    if (!message || !message.trim()) {
+      return;
+    }
+
+    const rawText = message.trim();
+    const text = normalize(rawText);
+
+    console.log(
+      `[Chatbot] ${messengerId}: ${rawText}`
+    );
+
+
+    /* =====================================================
+       CUSTOMER + CONVERSATION
+    ===================================================== */
+
+    const {
+      customer,
+      conversation,
+    } = await getCustomerAndConversation(
+      messengerId
+    );
+
+
+    /* =====================================================
+       GLOBAL CANCEL
+    ===================================================== */
+
+    if (
+      conversation.state !== "idle" &&
+      isCancel(text)
+    ) {
+      await resetConversation(conversation);
 
       return sendMessage(
         messengerId,
-        `জি অবশ্যই 😊\n\nProduct:\n${product.name}\n\nPrice:\n৳${formatPrice(
-          price
-        )}\n\nঅর্ডার করতে আপনার নামটি লিখুন।`
+        `ঠিক আছে 😊\n\nআপনার বর্তমান order process বাতিল করা হয়েছে।\n\nআপনি চাইলে আবার যেকোনো product-এর নাম লিখে শুরু করতে পারেন।`
       );
     }
-  }
 
-  // ======================================
-  // PRODUCT SEARCH
-  // ======================================
 
-  const product = await searchProduct(rawText);
+    /* =====================================================
+       WAITING NAME
+    ===================================================== */
 
-  if (product) {
-    const price = getProductPrice(product);
-    const stock = product.stock || 0;
+    if (
+      conversation.state === "waiting_name"
+    ) {
+      if (!isValidName(rawText)) {
+        return sendMessage(
+          messengerId,
+          `দুঃখিত 😊\n\nআপনার নামটি একটু পরিষ্কারভাবে লিখুন।\n\nউদাহরণ:\nSumit Das`
+        );
+      }
 
-    let reply = `📱 ${product.name}\n\n💰 Price:\n৳${formatPrice(
-      price
-    )}\n\n📦 Stock:\n${
-      stock > 0 ? `Available (${stock} pcs)` : "Out of Stock"
-    }`;
+      customer.name = rawText;
 
-    if (product.discountPrice && product.discountPrice > 0) {
-      reply += `\n\nRegular Price:\n৳${formatPrice(product.price)}`;
+      conversation.state =
+        "waiting_phone";
+
+      await Promise.all([
+        customer.save(),
+        conversation.save(),
+      ]);
+
+      return sendMessage(
+        messengerId,
+        `ধন্যবাদ, ${customer.name} 😊\n\nএখন আপনার ১১ সংখ্যার মোবাইল নম্বরটি দিন।\n\nউদাহরণ:\n01712345678`
+      );
     }
 
-    reply += `\n\nঅর্ডার করতে লিখুন:\n"আমি অর্ডার করব"`;
 
-    return sendMessage(messengerId, reply);
-  }
+    /* =====================================================
+       WAITING PHONE
+    ===================================================== */
 
-  // ======================================
-  // PRICE QUESTION
-  // ======================================
+    if (
+      conversation.state === "waiting_phone"
+    ) {
+      const phone = normalizePhone(rawText);
 
-  if (containsAny(text, ["price", "দাম", "কত", "মূল্য"])) {
+      if (
+        phone.length > MAX_PHONE_LENGTH ||
+        !isValidPhone(phone)
+      ) {
+        return sendMessage(
+          messengerId,
+          `দুঃখিত 😊\n\nএকটি সঠিক বাংলাদেশি মোবাইল নম্বর দিন।\n\nউদাহরণ:\n01712345678`
+        );
+      }
+
+      customer.phone = phone;
+
+      conversation.state =
+        "waiting_address";
+
+      await Promise.all([
+        customer.save(),
+        conversation.save(),
+      ]);
+
+      return sendMessage(
+        messengerId,
+        `ধন্যবাদ 😊\n\nএখন আপনার সম্পূর্ণ delivery address লিখুন।\n\nউদাহরণ:\nHouse 10, Road 5, Dhanmondi, Dhaka`
+      );
+    }
+
+
+    /* =====================================================
+       WAITING ADDRESS
+    ===================================================== */
+
+    if (
+      conversation.state ===
+      "waiting_address"
+    ) {
+      if (
+        rawText.length < 5 ||
+        rawText.length > MAX_ADDRESS_LENGTH
+      ) {
+        return sendMessage(
+          messengerId,
+          `দয়া করে আপনার সম্পূর্ণ delivery address লিখুন। 😊\n\nউদাহরণ:\nHouse 10, Road 5, Dhanmondi, Dhaka`
+        );
+      }
+
+      customer.address = rawText;
+
+      /*
+        IMPORTANT:
+        এখন product name দিয়ে search না করে
+        conversation.product ID ব্যবহার করছি।
+      */
+
+      const product = await Product.findById(
+        conversation.product
+      );
+
+      if (!product) {
+        await resetConversation(
+          conversation
+        );
+
+        return sendMessage(
+          messengerId,
+          `দুঃখিত 😔\n\nএই productটি এখন আর available নেই।\n\nআপনি চাইলে অন্য কোনো product-এর নাম লিখে চেষ্টা করতে পারেন।`
+        );
+      }
+
+      const price =
+        getProductDisplayPrice(product);
+
+      const quantity =
+        conversation.quantity || 1;
+
+      const stock =
+        Number(product.stock || 0);
+
+      if (stock < quantity) {
+        await resetConversation(
+          conversation
+        );
+
+        return sendMessage(
+          messengerId,
+          `দুঃখিত 😔\n\n${product.name}-এর বর্তমানে পর্যাপ্ত stock নেই।\n\nAvailable stock: ${stock} pcs`
+        );
+      }
+
+      await customer.save();
+
+      conversation.state =
+        "waiting_confirmation";
+
+      await conversation.save();
+
+      return sendMessage(
+        messengerId,
+        buildOrderSummary({
+          product,
+          quantity,
+          customer,
+        })
+      );
+    }
+
+
+    /* =====================================================
+       WAITING CONFIRMATION
+    ===================================================== */
+
+    if (
+      conversation.state ===
+      "waiting_confirmation"
+    ) {
+      if (isConfirmation(text)) {
+        const product =
+          await Product.findById(
+            conversation.product
+          );
+
+        if (!product) {
+          await resetConversation(
+            conversation
+          );
+
+          return sendMessage(
+            messengerId,
+            `দুঃখিত 😔\n\nএই productটি এখন আর available নেই।`
+          );
+        }
+
+        const stock =
+          Number(product.stock || 0);
+
+        const quantity =
+          conversation.quantity || 1;
+
+        if (stock < quantity) {
+          await resetConversation(
+            conversation
+          );
+
+          return sendMessage(
+            messengerId,
+            `দুঃখিত 😔\n\n${product.name}-এর পর্যাপ্ত stock নেই।\n\nAvailable stock: ${stock} pcs`
+          );
+        }
+
+        const price =
+          getProductDisplayPrice(
+            product
+          );
+
+        const total =
+          price * quantity;
+
+        const orderId =
+          `ORD-${Date.now()}`;
+
+        const order =
+          await Order.create({
+            orderId,
+
+            customer:
+              customer._id,
+
+            products: [
+              {
+                product:
+                  product._id,
+
+                name:
+                  product.name,
+
+                price,
+
+                quantity,
+
+                color:
+                  conversation.color || "",
+
+                size:
+                  conversation.size || "",
+              },
+            ],
+
+            totalAmount:
+              total,
+
+            deliveryAddress:
+              customer.address,
+
+            phone:
+              customer.phone,
+
+            status:
+              "pending",
+
+            source:
+              "facebook_messenger",
+          });
+
+
+        /*
+          Optional:
+          Stock decrease
+        */
+
+        product.stock =
+          Math.max(
+            0,
+            stock - quantity
+          );
+
+        await product.save();
+
+
+        await resetConversation(
+          conversation
+        );
+
+
+        return sendMessage(
+          messengerId,
+          `✅ Order Successfully Placed!\n\n` +
+
+          `🆔 Order ID:\n` +
+          `#${order.orderId}\n\n` +
+
+          `📱 Product:\n` +
+          `${product.name}\n\n` +
+
+          `🔢 Quantity:\n` +
+          `${quantity}\n\n` +
+
+          `💰 Total Amount:\n` +
+          `৳${formatPrice(total)}\n\n` +
+
+          `📦 Status:\n` +
+          `Pending\n\n` +
+
+          `ধন্যবাদ আমাদের সাথে অর্ডার করার জন্য। ❤️\n\n` +
+
+          `আমাদের team খুব শীঘ্রই আপনার সাথে যোগাযোগ করবে।`
+        );
+      }
+
+
+      if (
+        isNegativeConfirmation(text)
+      ) {
+        await resetConversation(
+          conversation
+        );
+
+        return sendMessage(
+          messengerId,
+          `ঠিক আছে 😊\n\nআপনার order বাতিল করা হয়েছে।\n\nআপনি চাইলে অন্য কোনো product-এর নাম লিখে নতুন করে শুরু করতে পারেন।`
+        );
+      }
+
+
+      return sendMessage(
+        messengerId,
+        `আপনার orderটি confirm করতে:\n\n✅ YES\n\nঅথবা\n\n❌ NO\n\nলিখুন।`
+      );
+    }
+
+
+    /* =====================================================
+       GREETING
+    ===================================================== */
+
+    if (isGreeting(text)) {
+      return sendMessage(
+        messengerId,
+        `Assalamu Alaikum! 😊\n\n` +
+
+        `স্বাগতম আমাদের store-এ। ❤️\n\n` +
+
+        `আমি আপনাকে সাহায্য করতে পারি:\n\n` +
+
+        `📱 Product Information\n` +
+        `💰 Product Price\n` +
+        `📦 Stock Availability\n` +
+        `🛒 Product Order\n\n` +
+
+        `আপনি যে productটি খুঁজছেন তার নাম লিখুন।\n\n` +
+
+        `উদাহরণ:\n` +
+        `iPhone 17 Pro Max`
+      );
+    }
+
+
+    /* =====================================================
+       QUANTITY REQUEST
+    ===================================================== */
+
+    if (
+      conversation.state ===
+      "waiting_quantity"
+    ) {
+      const quantity =
+        extractQuantity(rawText);
+
+      if (!quantity) {
+        return sendMessage(
+          messengerId,
+          `দয়া করে ১ থেকে ${MAX_QUANTITY}-এর মধ্যে একটি quantity লিখুন।\n\nউদাহরণ:\n2`
+        );
+      }
+
+      const product =
+        await Product.findById(
+          conversation.product
+        );
+
+      if (!product) {
+        await resetConversation(
+          conversation
+        );
+
+        return sendMessage(
+          messengerId,
+          `দুঃখিত 😔\n\nএই productটি এখন পাওয়া যাচ্ছে না।`
+        );
+      }
+
+      const stock =
+        Number(product.stock || 0);
+
+      if (stock < quantity) {
+        return sendMessage(
+          messengerId,
+          `দুঃখিত 😊\n\nএই product-এর available stock হলো ${stock} pcs।\n\nআপনি সর্বোচ্চ ${stock} pcs নিতে পারবেন।`
+        );
+      }
+
+      conversation.quantity =
+        quantity;
+
+      conversation.state =
+        "waiting_name";
+
+      await conversation.save();
+
+      return sendMessage(
+        messengerId,
+        `ঠিক আছে 😊\n\nQuantity: ${quantity} pcs\n\nএখন আপনার নামটি লিখুন।`
+      );
+    }
+
+
+    /* =====================================================
+       ORDER INTENT
+    ===================================================== */
+
+    if (wantsOrder(text)) {
+      const product =
+        await searchProduct(
+          rawText
+        );
+
+      if (product) {
+        const stock =
+          Number(product.stock || 0);
+
+        if (stock <= 0) {
+          return sendMessage(
+            messengerId,
+            `দুঃখিত 😔\n\n${product.name} বর্তমানে Out of Stock।\n\nঅন্য কোনো product-এর নাম লিখে চেষ্টা করতে পারেন।`
+          );
+        }
+
+        conversation.product =
+          product._id;
+
+        conversation.productName =
+          product.name;
+
+        conversation.quantity =
+          1;
+
+        conversation.state =
+          "waiting_name";
+
+        await conversation.save();
+
+        const price =
+          getProductDisplayPrice(
+            product
+          );
+
+        return sendMessage(
+          messengerId,
+          `জি অবশ্যই! 😊\n\n` +
+
+          `📱 Product:\n` +
+          `${product.name}\n\n` +
+
+          `💰 Price:\n` +
+          `৳${formatPrice(price)}\n\n` +
+
+          `📦 Available Stock:\n` +
+          `${stock} pcs\n\n` +
+
+          `অর্ডারটি শুরু করতে আপনার নামটি লিখুন।`
+        );
+      }
+
+      return sendMessage(
+        messengerId,
+        `অবশ্যই 😊\n\nআপনি কোন productটি অর্ডার করতে চান?\n\nProduct-এর নাম লিখুন।\n\nউদাহরণ:\niPhone 17 Pro Max`
+      );
+    }
+
+
+    /* =====================================================
+       PRODUCT SEARCH
+    ===================================================== */
+
+    const product =
+      await searchProduct(
+        rawText
+      );
+
+    if (product) {
+      return sendMessage(
+        messengerId,
+        buildProductReply(product)
+      );
+    }
+
+
+    /* =====================================================
+       PRICE QUESTION
+    ===================================================== */
+
+    if (asksPrice(text)) {
+      return sendMessage(
+        messengerId,
+        `অবশ্যই 😊\n\nআপনি কোন product-এর price জানতে চান?\n\nউদাহরণ:\n\n📱 iPhone 17 Pro Max\n📱 Samsung S25 Ultra\n💻 MacBook Air M5`
+      );
+    }
+
+
+    /* =====================================================
+       STOCK QUESTION
+    ===================================================== */
+
+    if (asksStock(text)) {
+      return sendMessage(
+        messengerId,
+        `জি 😊\n\nআপনি কোন product-এর stock জানতে চান?\n\nProduct-এর নাম লিখুন।\n\nউদাহরণ:\niPhone 17 Pro Max`
+      );
+    }
+
+
+    /* =====================================================
+       PRODUCT INFORMATION
+    ===================================================== */
+
+    if (asksProductInfo(text)) {
+      return sendMessage(
+        messengerId,
+        `অবশ্যই 😊\n\nআপনি কোন product-এর information জানতে চান?\n\nProduct-এর নাম লিখুন।`
+      );
+    }
+
+
+    /* =====================================================
+       THANK YOU
+    ===================================================== */
+
+    if (
+      containsAny(text, [
+        "thanks",
+        "thank you",
+        "ধন্যবাদ",
+        "অনেক ধন্যবাদ",
+      ])
+    ) {
+      return sendMessage(
+        messengerId,
+        `আপনাকেও ধন্যবাদ। ❤️\n\nযেকোনো সময় আমাদের message করতে পারেন। আমরা সাহায্য করতে প্রস্তুত। 😊`
+      );
+    }
+
+
+    /* =====================================================
+       BYE
+    ===================================================== */
+
+    if (
+      containsAny(text, [
+        "bye",
+        "বিদায়",
+        "আবার কথা হবে",
+      ])
+    ) {
+      return sendMessage(
+        messengerId,
+        `ঠিক আছে 😊\n\nআবারও আসবেন। ❤️\n\nআমাদের store-এ message করার জন্য ধন্যবাদ।`
+      );
+    }
+
+
+    /* =====================================================
+       DEFAULT FALLBACK
+    ===================================================== */
+
     return sendMessage(
       messengerId,
-      `অবশ্যই 😊\n\nআপনি কোন product-এর price জানতে চান?\n\nউদাহরণ:\niPhone 17 Pro Max`
+      `আমি আপনাকে সাহায্য করতে পারি। 😊\n\n` +
+
+      `আপনি লিখতে পারেন:\n\n` +
+
+      `📱 Product-এর নাম\n` +
+      `💰 Price জানতে\n` +
+      `📦 Stock জানতে\n` +
+      `🛒 Order করতে\n\n` +
+
+      `উদাহরণ:\n` +
+      `iPhone 17 Pro Max price কত?`
     );
-  }
 
-  // ======================================
-  // STOCK QUESTION
-  // ======================================
+  } catch (error) {
 
-  if (containsAny(text, ["stock", "available", "আছে", "অ্যাভেইলেবল"])) {
+    console.error(
+      "[Chatbot Error]",
+      error
+    );
+
     return sendMessage(
       messengerId,
-      `জি 😊\n\nআপনি কোন product-এর stock জানতে চান?\n\nProduct name লিখুন।`
+      `দুঃখিত 😔\n\nএই মুহূর্তে আপনার requestটি process করতে সমস্যা হচ্ছে।\n\nকিছুক্ষণ পরে আবার চেষ্টা করুন।`
     );
   }
-
-  // ======================================
-  // DEFAULT RESPONSE
-  // ======================================
-
-  return sendMessage(
-    messengerId,
-    `আমি আপনার সাহায্য করতে পারি 😊\n\nআপনি লিখতে পারেন:\n\n• Product price\n• Product stock\n• Product information\n• Order করতে চাই\n\nউদাহরণ:\n"iPhone 17 Pro Max price কত?"`
-  );
 }
+
 
 export default {
   handleMessage,

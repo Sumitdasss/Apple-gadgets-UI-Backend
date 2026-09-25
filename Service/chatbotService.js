@@ -91,6 +91,8 @@ function isConfirmation(text) {
     "জ্বি",
     "confirm",
     "confirmed",
+    "ok",
+    "okay",
     "ঠিক আছে",
     "ঠিকআছে",
     "অর্ডার করুন",
@@ -139,6 +141,7 @@ function asksPrice(text) {
     "টাকা",
     "cost",
     "dam",
+    "daam",
     "koto",
   ]);
 }
@@ -174,6 +177,52 @@ function asksProductInfo(text) {
 }
 
 /* =========================================================
+   PURE INTENT MESSAGE CHECK
+   ========================================================= */
+
+function isOnlyDetailsRequest(text) {
+  return [
+    "details",
+    "detail",
+    "info",
+    "information",
+    "spec",
+    "specs",
+    "specification",
+    "specifications",
+    "বিস্তারিত",
+    "তথ্য",
+    "ফিচার",
+    "স্পেসিফিকেশন",
+  ].includes(normalize(text));
+}
+
+function isOnlyPriceRequest(text) {
+  return [
+    "price",
+    "দাম",
+    "মূল্য",
+    "cost",
+    "dam",
+    "daam",
+    "koto",
+    "কত",
+  ].includes(normalize(text));
+}
+
+function isOnlyStockRequest(text) {
+  return [
+    "stock",
+    "available",
+    "availability",
+    "আছে",
+    "স্টক",
+    "ache",
+    "ase",
+  ].includes(normalize(text));
+}
+
+/* =========================================================
    CUSTOMER + CONVERSATION
 ========================================================= */
 
@@ -198,6 +247,12 @@ async function getCustomerAndConversation(messengerId) {
       messengerId,
       customer: customer._id,
       state: "idle",
+      product: null,
+      productName: "",
+      quantity: 1,
+      color: "",
+      size: "",
+      temporaryOrder: {},
     });
   }
 
@@ -233,6 +288,48 @@ async function resetConversation(conversation) {
 
 function getProductDisplayPrice(product) {
   return getProductPrice(product);
+}
+
+/* =========================================================
+   GET CURRENT PRODUCT
+========================================================= */
+
+async function getConversationProduct(conversation) {
+  if (!conversation?.product) {
+    return null;
+  }
+
+  const product = await Product.findOne({
+    _id: conversation.product,
+    isActive: true,
+  });
+
+  return product || null;
+}
+
+/* =========================================================
+   SAVE SELECTED PRODUCT
+========================================================= */
+
+async function saveSelectedProduct(
+  conversation,
+  product
+) {
+  if (!product) {
+    return;
+  }
+
+  conversation.product = product._id;
+  conversation.productName = product.name;
+
+  if (
+    !conversation.quantity ||
+    Number(conversation.quantity) < 1
+  ) {
+    conversation.quantity = 1;
+  }
+
+  await conversation.save();
 }
 
 /* =========================================================
@@ -293,8 +390,7 @@ function buildMultipleProductReply(products) {
     MAX_PRODUCT_RESULTS
   );
 
-  let reply =
-    `📱 Product Found\n\n`;
+  let reply = `📱 Product Found\n\n`;
 
   limitedProducts.forEach((product, index) => {
     const price = getProductPrice(product);
@@ -389,13 +485,39 @@ function buildProductDetailsReply(product) {
             `• ${key}: ${value}\n`;
         }
       );
+    } else if (Array.isArray(specifications)) {
+      specifications.forEach((item) => {
+        if (
+          item &&
+          typeof item === "object"
+        ) {
+          const key =
+            item.key ||
+            item.name ||
+            item.title;
+
+          const value =
+            item.value ||
+            item.description ||
+            "";
+
+          if (key) {
+            reply += `• ${key}: ${value}\n`;
+          } else {
+            reply += `• ${JSON.stringify(item)}\n`;
+          }
+        } else {
+          reply += `• ${item}\n`;
+        }
+      });
     } else {
       reply += `${specifications}\n`;
     }
   }
 
   reply +=
-    `\nআপনি চাইলে এই productটি order করতে পারেন। 😊`;
+    `\n🛒 Order করতে চাইলে লিখুন:\n` +
+    `"আমি order করতে চাই"`;
 
   return reply;
 }
@@ -409,39 +531,30 @@ function buildOrderSummary({
   quantity,
   customer,
 }) {
-  const price = getProductDisplayPrice(product);
+  const price =
+    getProductDisplayPrice(product);
 
   const total = price * quantity;
 
   return (
     `🧾 Order Summary\n\n` +
-
     `📱 Product:\n` +
     `${product.name}\n\n` +
-
     `🔢 Quantity:\n` +
     `${quantity}\n\n` +
-
     `💰 Unit Price:\n` +
     `৳${formatPrice(price)}\n\n` +
-
     `💵 Total:\n` +
     `৳${formatPrice(total)}\n\n` +
-
     `👤 Name:\n` +
-    `${customer.name}\n\n` +
-
+    `${customer.name || ""}\n\n` +
     `📞 Phone:\n` +
-    `${customer.phone}\n\n` +
-
+    `${customer.phone || ""}\n\n` +
     `📍 Delivery Address:\n` +
-    `${customer.address}\n\n` +
-
+    `${customer.address || ""}\n\n` +
     `-------------------------\n\n` +
-
     `অর্ডারটি confirm করতে লিখুন:\n` +
     `YES\n\n` +
-
     `অথবা বাতিল করতে লিখুন:\n` +
     `NO`
   );
@@ -518,20 +631,6 @@ function extractQuantity(text) {
 }
 
 /* =========================================================
-   GET CURRENT CONVERSATION PRODUCT
-========================================================= */
-
-async function getConversationProduct(conversation) {
-  if (!conversation.product) {
-    return null;
-  }
-
-  return Product.findById(
-    conversation.product
-  );
-}
-
-/* =========================================================
    MAIN CHATBOT
 ========================================================= */
 
@@ -552,9 +651,9 @@ export async function handleMessage(
     }
 
     const rawText = message.trim();
-
     const text = normalize(rawText);
 
+    console.log("====================================");
     console.log(
       `[Chatbot] ${messengerId}: ${rawText}`
     );
@@ -570,6 +669,18 @@ export async function handleMessage(
       await getCustomerAndConversation(
         messengerId
       );
+
+    console.log(
+      "[Chatbot State Before]:",
+      conversation.state
+    );
+
+    console.log(
+      "[Chatbot Selected Product]:",
+      conversation.product
+        ? String(conversation.product)
+        : "NONE"
+    );
 
     /* =====================================================
        GLOBAL CANCEL
@@ -587,27 +698,35 @@ export async function handleMessage(
         messengerId,
 
         `ঠিক আছে 😊\n\n` +
-        `আপনার বর্তমান order process বাতিল করা হয়েছে।\n\n` +
-        `আপনি চাইলে আবার যেকোনো product-এর নাম লিখে শুরু করতে পারেন।`
+          `আপনার বর্তমান order process বাতিল করা হয়েছে।\n\n` +
+          `আপনি চাইলে আবার যেকোনো product-এর নাম লিখে শুরু করতে পারেন।`
       );
     }
 
     /* =====================================================
-       WAITING NAME
+       1. WAITING NAME
+       
+       VERY IMPORTANT:
+       এখানে ঢুকলে আর নিচের কোনো product search
+       চলবে না।
     ===================================================== */
 
     if (
       conversation.state ===
       "waiting_name"
     ) {
+      console.log(
+        "[Chatbot] WAITING_NAME"
+      );
+
       if (!isValidName(rawText)) {
         return sendMessage(
           messengerId,
 
           `দুঃখিত 😊\n\n` +
-          `আপনার নামটি একটু পরিষ্কারভাবে লিখুন।\n\n` +
-          `উদাহরণ:\n` +
-          `Sumit Das`
+            `আপনার নামটি একটু পরিষ্কারভাবে লিখুন।\n\n` +
+            `উদাহরণ:\n` +
+            `Sumit Das`
         );
       }
 
@@ -616,29 +735,31 @@ export async function handleMessage(
       conversation.state =
         "waiting_phone";
 
-      await Promise.all([
-        customer.save(),
-        conversation.save(),
-      ]);
+      await customer.save();
+      await conversation.save();
 
       return sendMessage(
         messengerId,
 
         `ধন্যবাদ, ${customer.name} 😊\n\n` +
-        `এখন আপনার মোবাইল নম্বরটি দিন।\n\n` +
-        `উদাহরণ:\n` +
-        `01712345678`
+          `এখন আপনার মোবাইল নম্বরটি দিন।\n\n` +
+          `উদাহরণ:\n` +
+          `01712345678`
       );
     }
 
     /* =====================================================
-       WAITING PHONE
+       2. WAITING PHONE
     ===================================================== */
 
     if (
       conversation.state ===
       "waiting_phone"
     ) {
+      console.log(
+        "[Chatbot] WAITING_PHONE"
+      );
+
       const phone =
         normalizePhone(rawText);
 
@@ -651,9 +772,9 @@ export async function handleMessage(
           messengerId,
 
           `দুঃখিত 😊\n\n` +
-          `একটি সঠিক বাংলাদেশি মোবাইল নম্বর দিন।\n\n` +
-          `উদাহরণ:\n` +
-          `01712345678`
+            `একটি সঠিক বাংলাদেশি মোবাইল নম্বর দিন।\n\n` +
+            `উদাহরণ:\n` +
+            `01712345678`
         );
       }
 
@@ -662,29 +783,31 @@ export async function handleMessage(
       conversation.state =
         "waiting_address";
 
-      await Promise.all([
-        customer.save(),
-        conversation.save(),
-      ]);
+      await customer.save();
+      await conversation.save();
 
       return sendMessage(
         messengerId,
 
         `ধন্যবাদ 😊\n\n` +
-        `এখন আপনার সম্পূর্ণ delivery address লিখুন।\n\n` +
-        `উদাহরণ:\n` +
-        `House 10, Road 5, Dhanmondi, Dhaka`
+          `এখন আপনার সম্পূর্ণ delivery address লিখুন।\n\n` +
+          `উদাহরণ:\n` +
+          `House 10, Road 5, Dhanmondi, Dhaka`
       );
     }
 
     /* =====================================================
-       WAITING ADDRESS
+       3. WAITING ADDRESS
     ===================================================== */
 
     if (
       conversation.state ===
       "waiting_address"
     ) {
+      console.log(
+        "[Chatbot] WAITING_ADDRESS"
+      );
+
       if (
         rawText.length < 5 ||
         rawText.length >
@@ -694,8 +817,8 @@ export async function handleMessage(
           messengerId,
 
           `দয়া করে আপনার সম্পূর্ণ delivery address লিখুন। 😊\n\n` +
-          `উদাহরণ:\n` +
-          `House 10, Road 5, Dhanmondi, Dhaka`
+            `উদাহরণ:\n` +
+            `House 10, Road 5, Dhanmondi, Dhaka`
         );
       }
 
@@ -715,12 +838,14 @@ export async function handleMessage(
           messengerId,
 
           `দুঃখিত 😔\n\n` +
-          `এই productটি এখন আর available নেই।`
+            `এই productটি এখন আর available নেই।`
         );
       }
 
       const quantity =
-        conversation.quantity || 1;
+        Number(
+          conversation.quantity || 1
+        );
 
       const stock =
         getProductStock(product);
@@ -734,8 +859,8 @@ export async function handleMessage(
           messengerId,
 
           `দুঃখিত 😔\n\n` +
-          `${product.name}-এর বর্তমানে পর্যাপ্ত stock নেই।\n\n` +
-          `Available stock: ${stock} pcs`
+            `${product.name}-এর বর্তমানে পর্যাপ্ত stock নেই।\n\n` +
+            `Available stock: ${stock} pcs`
         );
       }
 
@@ -758,13 +883,17 @@ export async function handleMessage(
     }
 
     /* =====================================================
-       WAITING CONFIRMATION
+       4. WAITING CONFIRMATION
     ===================================================== */
 
     if (
       conversation.state ===
       "waiting_confirmation"
     ) {
+      console.log(
+        "[Chatbot] WAITING_CONFIRMATION"
+      );
+
       if (isConfirmation(text)) {
         const product =
           await getConversationProduct(
@@ -780,7 +909,7 @@ export async function handleMessage(
             messengerId,
 
             `দুঃখিত 😔\n\n` +
-            `এই productটি এখন আর available নেই।`
+              `এই productটি এখন আর available নেই।`
           );
         }
 
@@ -788,7 +917,9 @@ export async function handleMessage(
           getProductStock(product);
 
         const quantity =
-          conversation.quantity || 1;
+          Number(
+            conversation.quantity || 1
+          );
 
         if (stock < quantity) {
           await resetConversation(
@@ -799,8 +930,8 @@ export async function handleMessage(
             messengerId,
 
             `দুঃখিত 😔\n\n` +
-            `${product.name}-এর পর্যাপ্ত stock নেই।\n\n` +
-            `Available stock: ${stock} pcs`
+              `${product.name}-এর পর্যাপ্ত stock নেই।\n\n` +
+              `Available stock: ${stock} pcs`
           );
         }
 
@@ -858,9 +989,14 @@ export async function handleMessage(
               "facebook_messenger",
           });
 
-        /* =================================================
+        console.log(
+          "[Chatbot] Order Created:",
+          order.orderId
+        );
+
+        /* ===============================================
            DECREASE STOCK
-        ================================================= */
+        =============================================== */
 
         product.stock =
           Math.max(
@@ -879,24 +1015,24 @@ export async function handleMessage(
 
           `✅ Order Successfully Placed!\n\n` +
 
-          `🆔 Order ID:\n` +
-          `#${order.orderId}\n\n` +
+            `🆔 Order ID:\n` +
+            `#${order.orderId}\n\n` +
 
-          `📱 Product:\n` +
-          `${product.name}\n\n` +
+            `📱 Product:\n` +
+            `${product.name}\n\n` +
 
-          `🔢 Quantity:\n` +
-          `${quantity}\n\n` +
+            `🔢 Quantity:\n` +
+            `${quantity}\n\n` +
 
-          `💰 Total Amount:\n` +
-          `৳${formatPrice(total)}\n\n` +
+            `💰 Total Amount:\n` +
+            `৳${formatPrice(total)}\n\n` +
 
-          `📦 Status:\n` +
-          `Pending\n\n` +
+            `📦 Status:\n` +
+            `Pending\n\n` +
 
-          `ধন্যবাদ আমাদের সাথে অর্ডার করার জন্য। ❤️\n\n` +
+            `ধন্যবাদ আমাদের সাথে অর্ডার করার জন্য। ❤️\n\n` +
 
-          `আমাদের team খুব শীঘ্রই আপনার সাথে যোগাযোগ করবে।`
+            `আমাদের team খুব শীঘ্রই আপনার সাথে যোগাযোগ করবে।`
         );
       }
 
@@ -911,8 +1047,8 @@ export async function handleMessage(
           messengerId,
 
           `ঠিক আছে 😊\n\n` +
-          `আপনার order বাতিল করা হয়েছে।\n\n` +
-          `আপনি চাইলে অন্য কোনো product-এর নাম লিখে নতুন করে শুরু করতে পারেন।`
+            `আপনার order বাতিল করা হয়েছে।\n\n` +
+            `আপনি চাইলে অন্য কোনো product-এর নাম লিখে নতুন করে শুরু করতে পারেন।`
         );
       }
 
@@ -920,15 +1056,15 @@ export async function handleMessage(
         messengerId,
 
         `আপনার orderটি confirm করতে:\n\n` +
-        `✅ YES\n\n` +
-        `অথবা\n\n` +
-        `❌ NO\n\n` +
-        `লিখুন।`
+          `✅ YES\n\n` +
+          `অথবা\n\n` +
+          `❌ NO\n\n` +
+          `লিখুন।`
       );
     }
 
     /* =====================================================
-       GREETING
+       5. GREETING
     ===================================================== */
 
     if (isGreeting(text)) {
@@ -936,31 +1072,168 @@ export async function handleMessage(
         messengerId,
 
         `Assalamu Alaikum! 😊\n\n` +
-
-        `স্বাগতম আমাদের store-এ। ❤️\n\n` +
-
-        `আমি আপনাকে সাহায্য করতে পারি:\n\n` +
-
-        `📱 Product Information\n` +
-        `💰 Product Price\n` +
-        `📦 Stock Availability\n` +
-        `🛒 Product Order\n\n` +
-
-        `আপনি যে productটি খুঁজছেন তার নাম লিখুন।\n\n` +
-
-        `উদাহরণ:\n` +
-        `iPhone 17 Pro Max`
+          `স্বাগতম আমাদের store-এ। ❤️\n\n` +
+          `আমি আপনাকে সাহায্য করতে পারি:\n\n` +
+          `📱 Product Information\n` +
+          `💰 Product Price\n` +
+          `📦 Stock Availability\n` +
+          `🛒 Product Order\n\n` +
+          `আপনি যে productটি খুঁজছেন তার নাম লিখুন।\n\n` +
+          `উদাহরণ:\n` +
+          `iPhone 17 Pro Max`
       );
     }
 
     /* =====================================================
-       WAITING QUANTITY
+       6. DETAILS OF ALREADY SELECTED PRODUCT
+       
+       IMPORTANT FIX
+       
+       User:
+       Intel Core Ultra...
+       
+       Bot:
+       Product
+       
+       User:
+       details
+       
+       এখানে নতুন search না করে conversation.product
+       ব্যবহার হবে।
+    ===================================================== */
+
+    if (
+      isOnlyDetailsRequest(text)
+    ) {
+      const currentProduct =
+        await getConversationProduct(
+          conversation
+        );
+
+      if (currentProduct) {
+        return sendMessage(
+          messengerId,
+
+          buildProductDetailsReply(
+            currentProduct
+          )
+        );
+      }
+
+      return sendMessage(
+        messengerId,
+
+        `অবশ্যই 😊\n\n` +
+          `আপনি কোন product-এর information জানতে চান?\n\n` +
+          `Product-এর নাম লিখুন।\n\n` +
+          `উদাহরণ:\n` +
+          `iPhone 17 Pro Max`
+      );
+    }
+
+    /* =====================================================
+       7. PRICE OF ALREADY SELECTED PRODUCT
+    ===================================================== */
+
+    if (
+      isOnlyPriceRequest(text)
+    ) {
+      const currentProduct =
+        await getConversationProduct(
+          conversation
+        );
+
+      if (currentProduct) {
+        const price =
+          getProductPrice(
+            currentProduct
+          );
+
+        const stock =
+          getProductStock(
+            currentProduct
+          );
+
+        return sendMessage(
+          messengerId,
+
+          `📱 ${currentProduct.name}\n\n` +
+            `💰 Price: ৳${formatPrice(
+              price
+            )}\n\n` +
+            `📦 Stock: ${
+              stock > 0
+                ? `Available (${stock} pcs)`
+                : "Out of Stock"
+            }`
+        );
+      }
+
+      return sendMessage(
+        messengerId,
+
+        `অবশ্যই 😊\n\n` +
+          `আপনি কোন product-এর price জানতে চান?\n\n` +
+          `উদাহরণ:\n` +
+          `iPhone 17 Pro Max`
+      );
+    }
+
+    /* =====================================================
+       8. STOCK OF ALREADY SELECTED PRODUCT
+    ===================================================== */
+
+    if (
+      isOnlyStockRequest(text)
+    ) {
+      const currentProduct =
+        await getConversationProduct(
+          conversation
+        );
+
+      if (currentProduct) {
+        const stock =
+          getProductStock(
+            currentProduct
+          );
+
+        return sendMessage(
+          messengerId,
+
+          `📱 ${currentProduct.name}\n\n` +
+            `📦 Stock: ${
+              stock > 0
+                ? `Available (${stock} pcs)`
+                : "Out of Stock"
+            }`
+        );
+      }
+
+      return sendMessage(
+        messengerId,
+
+        `জি 😊\n\n` +
+          `আপনি কোন product-এর stock জানতে চান?\n\n` +
+          `Product-এর নাম লিখুন।\n\n` +
+          `উদাহরণ:\n` +
+          `iPhone 17 Pro Max`
+      );
+    }
+
+    /* =====================================================
+       9. WAITING QUANTITY
+       
+       Product search-এর আগেই থাকবে।
     ===================================================== */
 
     if (
       conversation.state ===
       "waiting_quantity"
     ) {
+      console.log(
+        "[Chatbot] WAITING_QUANTITY"
+      );
+
       const quantity =
         extractQuantity(rawText);
 
@@ -969,8 +1242,8 @@ export async function handleMessage(
           messengerId,
 
           `দয়া করে ১ থেকে ${MAX_QUANTITY}-এর মধ্যে একটি quantity লিখুন।\n\n` +
-          `উদাহরণ:\n` +
-          `2`
+            `উদাহরণ:\n` +
+            `2`
         );
       }
 
@@ -988,7 +1261,7 @@ export async function handleMessage(
           messengerId,
 
           `দুঃখিত 😔\n\n` +
-          `এই productটি এখন পাওয়া যাচ্ছে না।`
+            `এই productটি এখন পাওয়া যাচ্ছে না।`
         );
       }
 
@@ -1000,8 +1273,8 @@ export async function handleMessage(
           messengerId,
 
           `দুঃখিত 😊\n\n` +
-          `এই product-এর available stock হলো ${stock} pcs।\n\n` +
-          `আপনি সর্বোচ্চ ${stock} pcs নিতে পারবেন।`
+            `এই product-এর available stock হলো ${stock} pcs।\n\n` +
+            `আপনি সর্বোচ্চ ${stock} pcs নিতে পারবেন।`
         );
       }
 
@@ -1017,81 +1290,112 @@ export async function handleMessage(
         messengerId,
 
         `ঠিক আছে 😊\n\n` +
-        `Quantity: ${quantity} pcs\n\n` +
-        `এখন আপনার নামটি লিখুন।`
+          `Quantity: ${quantity} pcs\n\n` +
+          `এখন আপনার নামটি লিখুন।`
       );
     }
 
     /* =====================================================
-       ORDER INTENT
+       10. ORDER INTENT
+       
+       IMPORTANT FIX:
+       Existing selected product থাকলে সেটাই ব্যবহার হবে।
     ===================================================== */
 
     if (wantsOrder(text)) {
+      console.log(
+        "[Chatbot] ORDER INTENT"
+      );
+
       let product = null;
 
-      /*
-       যদি conversation-এ আগের selected product থাকে,
-       সেটাই আগে ব্যবহার করব।
-      */
+      /* -----------------------------------------------
+         প্রথম priority:
+         Conversation-এর selected product
+      ------------------------------------------------ */
 
       if (conversation.product) {
         product =
           await getConversationProduct(
             conversation
           );
+
+        console.log(
+          "[Order] Existing product:",
+          product?.name || "NOT FOUND"
+        );
       }
 
-      /*
-       conversation product না থাকলে
-       user message থেকে search করব।
-      */
+      /* -----------------------------------------------
+         দ্বিতীয় priority:
+         Message-এর মধ্যে product name থাকলে search
+      ------------------------------------------------ */
 
       if (!product) {
         product =
           await searchProduct(
             rawText
           );
+
+        console.log(
+          "[Order] Search product:",
+          product?.name || "NOT FOUND"
+        );
       }
 
-      if (product) {
-        const stock =
-          getProductStock(product);
+      /* -----------------------------------------------
+         Product পাওয়া যায়নি
+      ------------------------------------------------ */
 
-        if (stock <= 0) {
-          return sendMessage(
-            messengerId,
-
-            `দুঃখিত 😔\n\n` +
-            `${product.name} বর্তমানে Out of Stock।\n\n` +
-            `অন্য কোনো product-এর নাম লিখে চেষ্টা করতে পারেন।`
-          );
-        }
-
-        conversation.product =
-          product._id;
-
-        conversation.productName =
-          product.name;
-
-        /*
-         Quantity 1 দিয়ে শুরু করছি।
-         চাইলে পরে quantity প্রশ্ন করানো যাবে।
-        */
-
-        conversation.quantity = 1;
-
-        conversation.state =
-          "waiting_name";
-
-        await conversation.save();
-
-        const price =
-          getProductPrice(product);
-
+      if (!product) {
         return sendMessage(
           messengerId,
 
-          `জি অবশ্যই! 😊\n\n` +
+          `অবশ্যই 😊\n\n` +
+            `আপনি কোন productটি অর্ডার করতে চান?\n\n` +
+            `Product-এর নাম লিখুন।\n\n` +
+            `উদাহরণ:\n` +
+            `iPhone 17 Pro Max`
+        );
+      }
+
+      const stock =
+        getProductStock(product);
+
+      if (stock <= 0) {
+        return sendMessage(
+          messengerId,
+
+          `দুঃখিত 😔\n\n` +
+            `${product.name} বর্তমানে Out of Stock।\n\n` +
+            `অন্য কোনো product-এর নাম লিখে চেষ্টা করতে পারেন।`
+        );
+      }
+
+      /* -----------------------------------------------
+         ⭐ Save selected product
+      ------------------------------------------------ */
+
+      conversation.product =
+        product._id;
+
+      conversation.productName =
+        product.name;
+
+      conversation.quantity = 1;
+
+      conversation.state =
+        "waiting_name";
+
+      await conversation.save();
+
+      const price =
+        getProductPrice(product);
+
+      return sendMessage(
+        messengerId,
+
+        `জি অবশ্যই! 😊\n\n` +
 
           `📱 Product:\n` +
           `${product.name}\n\n` +
@@ -1103,58 +1407,79 @@ export async function handleMessage(
           `${stock} pcs\n\n` +
 
           `অর্ডারটি শুরু করতে আপনার নামটি লিখুন।`
-        );
-      }
-
-      return sendMessage(
-        messengerId,
-
-        `অবশ্যই 😊\n\n` +
-
-        `আপনি কোন productটি অর্ডার করতে চান?\n\n` +
-
-        `Product-এর নাম লিখুন।\n\n` +
-
-        `উদাহরণ:\n` +
-        `iPhone 17 Pro Max`
       );
     }
 
     /* =====================================================
-       PRODUCT SEARCH
+       11. PRODUCT SEARCH
        
-       প্রথমে multiple product search
+       এখানে আসবে শুধুমাত্র যখন কোনো order state নেই।
     ===================================================== */
+
+    console.log(
+      "[Chatbot] PRODUCT SEARCH:",
+      rawText
+    );
 
     const products =
       await searchProducts(
         rawText
       );
 
+    console.log(
+      "[Chatbot] Products Found:",
+      products.map((p) => ({
+        id: p?._id,
+        name: p?.name,
+        price: p?.price,
+        discountPrice:
+          p?.discountPrice,
+        stock: p?.stock,
+        isActive:
+          p?.isActive,
+      }))
+    );
+
     /* =====================================================
-       EXACT / SINGLE PRODUCT
+       12. SINGLE PRODUCT
     ===================================================== */
 
     if (products.length === 1) {
       const product =
         products[0];
 
-      /*
-       Details চাইলে details দেখাব
-      */
+      /* -----------------------------------------------
+         ⭐ IMPORTANT:
+         Every successful product search saves product
+      ------------------------------------------------ */
+
+      await saveSelectedProduct(
+        conversation,
+        product
+      );
+
+      console.log(
+        "[Chatbot] Selected Product Saved:",
+        product.name
+      );
+
+      /* -----------------------------------------------
+         Details
+      ------------------------------------------------ */
 
       if (asksProductInfo(text)) {
         return sendMessage(
           messengerId,
+
           buildProductDetailsReply(
             product
           )
         );
       }
 
-      /*
-       শুধু stock জানতে চাইলে
-      */
+      /* -----------------------------------------------
+         Stock
+      ------------------------------------------------ */
 
       if (asksStock(text)) {
         const stock =
@@ -1164,38 +1489,43 @@ export async function handleMessage(
           messengerId,
 
           `📱 ${product.name}\n\n` +
-          `📦 Stock: ${
-            stock > 0
-              ? `Available (${stock} pcs)`
-              : "Out of Stock"
-          }`
+            `📦 Stock: ${
+              stock > 0
+                ? `Available (${stock} pcs)`
+                : "Out of Stock"
+            }`
         );
       }
 
-      /*
-       Price question হলে
-      */
+      /* -----------------------------------------------
+         Price
+      ------------------------------------------------ */
 
       if (asksPrice(text)) {
         const price =
           getProductPrice(product);
 
+        const stock =
+          getProductStock(product);
+
         return sendMessage(
           messengerId,
 
           `📱 ${product.name}\n\n` +
-          `💰 Price: ৳${formatPrice(price)}\n\n` +
-          `📦 Stock: ${
-            getProductStock(product) > 0
-              ? `Available (${getProductStock(product)} pcs)`
-              : "Out of Stock"
-          }`
+            `💰 Price: ৳${formatPrice(
+              price
+            )}\n\n` +
+            `📦 Stock: ${
+              stock > 0
+                ? `Available (${stock} pcs)`
+                : "Out of Stock"
+            }`
         );
       }
 
-      /*
-       সাধারণ product request
-      */
+      /* -----------------------------------------------
+         Normal product
+      ------------------------------------------------ */
 
       return sendMessage(
         messengerId,
@@ -1205,7 +1535,7 @@ export async function handleMessage(
     }
 
     /* =====================================================
-       MULTIPLE PRODUCTS
+       13. MULTIPLE PRODUCTS
     ===================================================== */
 
     if (
@@ -1221,7 +1551,7 @@ export async function handleMessage(
     }
 
     /* =====================================================
-       PRICE QUESTION WITHOUT PRODUCT
+       14. PRICE WITHOUT PRODUCT
     ===================================================== */
 
     if (asksPrice(text)) {
@@ -1229,19 +1559,16 @@ export async function handleMessage(
         messengerId,
 
         `অবশ্যই 😊\n\n` +
-
-        `আপনি কোন product-এর price জানতে চান?\n\n` +
-
-        `উদাহরণ:\n\n` +
-
-        `📱 iPhone 17 Pro Max\n` +
-        `📱 Samsung S25 Ultra\n` +
-        `💻 MacBook Air`
+          `আপনি কোন product-এর price জানতে চান?\n\n` +
+          `উদাহরণ:\n\n` +
+          `📱 iPhone 17 Pro Max\n` +
+          `📱 Samsung S25 Ultra\n` +
+          `💻 MacBook Air`
       );
     }
 
     /* =====================================================
-       STOCK QUESTION WITHOUT PRODUCT
+       15. STOCK WITHOUT PRODUCT
     ===================================================== */
 
     if (asksStock(text)) {
@@ -1249,18 +1576,15 @@ export async function handleMessage(
         messengerId,
 
         `জি 😊\n\n` +
-
-        `আপনি কোন product-এর stock জানতে চান?\n\n` +
-
-        `Product-এর নাম লিখুন।\n\n` +
-
-        `উদাহরণ:\n` +
-        `iPhone 17 Pro Max`
+          `আপনি কোন product-এর stock জানতে চান?\n\n` +
+          `Product-এর নাম লিখুন।\n\n` +
+          `উদাহরণ:\n` +
+          `iPhone 17 Pro Max`
       );
     }
 
     /* =====================================================
-       PRODUCT INFO WITHOUT PRODUCT
+       16. INFO WITHOUT PRODUCT
     ===================================================== */
 
     if (asksProductInfo(text)) {
@@ -1268,18 +1592,15 @@ export async function handleMessage(
         messengerId,
 
         `অবশ্যই 😊\n\n` +
-
-        `আপনি কোন product-এর information জানতে চান?\n\n` +
-
-        `Product-এর নাম লিখুন।\n\n` +
-
-        `উদাহরণ:\n` +
-        `iPhone 17 Pro Max`
+          `আপনি কোন product-এর information জানতে চান?\n\n` +
+          `Product-এর নাম লিখুন।\n\n` +
+          `উদাহরণ:\n` +
+          `iPhone 17 Pro Max`
       );
     }
 
     /* =====================================================
-       THANK YOU
+       17. THANK YOU
     ===================================================== */
 
     if (
@@ -1294,12 +1615,12 @@ export async function handleMessage(
         messengerId,
 
         `আপনাকেও ধন্যবাদ। ❤️\n\n` +
-        `যেকোনো সময় আমাদের message করতে পারেন। আমরা সাহায্য করতে প্রস্তুত। 😊`
+          `যেকোনো সময় আমাদের message করতে পারেন। আমরা সাহায্য করতে প্রস্তুত। 😊`
       );
     }
 
     /* =====================================================
-       BYE
+       18. BYE
     ===================================================== */
 
     if (
@@ -1313,13 +1634,13 @@ export async function handleMessage(
         messengerId,
 
         `ঠিক আছে 😊\n\n` +
-        `আবারও আসবেন। ❤️\n\n` +
-        `আমাদের store-এ message করার জন্য ধন্যবাদ।`
+          `আবারও আসবেন। ❤️\n\n` +
+          `আমাদের store-এ message করার জন্য ধন্যবাদ।`
       );
     }
 
     /* =====================================================
-       FINAL FALLBACK
+       19. FINAL FALLBACK
        
        NO OPENAI
     ===================================================== */
@@ -1328,35 +1649,60 @@ export async function handleMessage(
       messengerId,
 
       `দুঃখিত 😊\n\n` +
-
-      `আমি আপনার কথাটি বুঝতে পারিনি।\n\n` +
-
-      `আপনি আমাদের database-এ থাকা product-এর নাম লিখে জানতে পারেন:\n\n` +
-
-      `📱 Product Price\n` +
-      `📦 Stock\n` +
-      `📝 Details\n` +
-      `🛒 Order\n\n` +
-
-      `উদাহরণ:\n` +
-      `iPhone 17 Pro Max price কত?\n\n` +
-
-      `অথবা শুধু লিখুন:\n` +
-      `iPhone`
+        `আমি আপনার কথাটি বুঝতে পারিনি।\n\n` +
+        `আপনি আমাদের database-এ থাকা product-এর নাম লিখে জানতে পারেন:\n\n` +
+        `📱 Product Price\n` +
+        `📦 Stock\n` +
+        `📝 Details\n` +
+        `🛒 Order\n\n` +
+        `উদাহরণ:\n` +
+        `iPhone 17 Pro Max price কত?\n\n` +
+        `অথবা শুধু লিখুন:\n` +
+        `iPhone`
     );
   } catch (error) {
-  console.error("====================================");
-  console.error("[Chatbot Error]");
-  console.error("Message:", error?.message);
-  console.error("Stack:", error?.stack);
-  console.error("Full Error:", error);
-  console.error("====================================");
+    console.error(
+      "===================================="
+    );
 
-  await sendMessage(
-    senderId,
-    "দুঃখিত 😔\n\nএই মুহূর্তে আপনার requestটি process করতে সমস্যা হচ্ছে।\n\nকিছুক্ষণ পরে আবার চেষ্টা করুন।"
-  );
-}
+    console.error(
+      "[Chatbot Error]"
+    );
+
+    console.error(
+      "Message:",
+      error?.message
+    );
+
+    console.error(
+      "Stack:",
+      error?.stack
+    );
+
+    console.error(
+      "Full Error:",
+      error
+    );
+
+    console.error(
+      "===================================="
+    );
+
+    try {
+      await sendMessage(
+        messengerId,
+
+        `দুঃখিত 😔\n\n` +
+          `এই মুহূর্তে আপনার requestটি process করতে সমস্যা হচ্ছে।\n\n` +
+          `কিছুক্ষণ পরে আবার চেষ্টা করুন।`
+      );
+    } catch (sendError) {
+      console.error(
+        "[Messenger Send Error]:",
+        sendError
+      );
+    }
+  }
 }
 
 /* =========================================================

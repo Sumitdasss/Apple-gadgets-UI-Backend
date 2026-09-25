@@ -1,14 +1,15 @@
+import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import DNS from "dns";
-import dotenv from "dotenv";
+
 
 import { connectDB } from "./config/db.js";
 import router from "./routes/index.js";
 
 DNS.setServers(["1.1.1.1", "8.8.8.8"]);
 
-dotenv.config();
+
 
 const app = express();
 

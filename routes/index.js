@@ -16,9 +16,10 @@ router.post('/addproduct',upload.fields([
 ]),addProduct);
 
 
-router.get("/webhook/test-page", verifyWebhook);
+router.get("/webhook", verifyWebhook);
 
-router.post("/webhook/test-page", receiveWebhook);
+router.post("/webhook", receiveWebhook);
+
 router.get('/getallProduct',getAllProduct);
 
 router.post("/creatcatagori", createCategory);

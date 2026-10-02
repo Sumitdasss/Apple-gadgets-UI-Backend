@@ -2,6 +2,10 @@ import mongoose from "mongoose";
 
 const productSchema = new mongoose.Schema(
   {
+    // =========================
+    // BASIC
+    // =========================
+
     name: {
       type: String,
       required: true,
@@ -25,40 +29,58 @@ const productSchema = new mongoose.Schema(
       default: "",
     },
 
+    // =========================
+    // 4 LEVEL CATEGORY
+    // =========================
+
     category: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "Category",
+      ref: "MainCategory",
       required: true,
     },
 
     subCategory: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "Category",
+      ref: "SubCategory",
       default: null,
     },
 
     childCategory: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "Category",
+      ref: "ChildCategory",
       default: null,
     },
 
     subChildCategory: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "Category",
+      ref: "SubChildCategory",
       default: null,
     },
-additionalCategories: [
-  {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "Category",
-  },
-],
+
+    // =========================
+    // ADDITIONAL CATEGORIES
+    // =========================
+
+    additionalCategories: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "MainCategory",
+      },
+    ],
+
+    // =========================
+    // BRAND
+    // =========================
+
     brand: {
       type: String,
       default: "",
       trim: true,
     },
+
+    // =========================
+    // PRICE
+    // =========================
 
     price: {
       type: Number,
@@ -75,7 +97,13 @@ additionalCategories: [
     discountPercentage: {
       type: Number,
       default: 0,
+      min: 0,
+      max: 100,
     },
+
+    // =========================
+    // STOCK
+    // =========================
 
     stock: {
       type: Number,
@@ -92,50 +120,82 @@ additionalCategories: [
     // =========================
     // COLORS
     // =========================
+
     colors: [
-  {
-    name: {
-      type: String,
-      trim: true,
-    },
+      {
+        name: {
+          type: String,
+          trim: true,
+        },
 
-    code: {
-      type: String,
-      trim: true,
-    },
+        code: {
+          type: String,
+          trim: true,
+        },
 
-    image: {
-      type: String,
-      trim: true,
-      default: "",
-    },
-  },
-],
-variants: [
-  {
-    color: {
-      name: String,
-      code: String,
-      image: String,
-    },
+        image: {
+          type: String,
+          trim: true,
+          default: "",
+        },
+      },
+    ],
 
-    ram: String,
+    // =========================
+    // VARIANTS
+    // =========================
 
-    storage: String,
+    variants: [
+      {
+        color: {
+          name: {
+            type: String,
+            default: "",
+          },
 
-    stock: {
-      type: Number,
-      default: 0,
-    },
+          code: {
+            type: String,
+            default: "",
+          },
 
-    price: Number,
+          image: {
+            type: String,
+            default: "",
+          },
+        },
 
-    sku: String,
-  },
-],
+        ram: {
+          type: String,
+          default: "",
+        },
+
+        storage: {
+          type: String,
+          default: "",
+        },
+
+        stock: {
+          type: Number,
+          default: 0,
+          min: 0,
+        },
+
+        price: {
+          type: Number,
+          min: 0,
+        },
+
+        sku: {
+          type: String,
+          default: "",
+        },
+      },
+    ],
+
     // =========================
     // SIZES
     // =========================
+
     sizes: {
       type: [String],
       default: [],
@@ -144,6 +204,7 @@ variants: [
     // =========================
     // RAM / MEMORY
     // =========================
+
     ram: {
       type: [String],
       default: [],
@@ -152,6 +213,7 @@ variants: [
     // =========================
     // SPECIFICATIONS
     // =========================
+
     specifications: [
       {
         key: {
@@ -171,6 +233,7 @@ variants: [
     // =========================
     // RATING
     // =========================
+
     rating: {
       type: Number,
       default: 0,
@@ -181,6 +244,7 @@ variants: [
     // =========================
     // STATUS
     // =========================
+
     isActive: {
       type: Boolean,
       default: true,
@@ -204,6 +268,7 @@ variants: [
     // =========================
     // SEO
     // =========================
+
     metaTitle: {
       type: String,
       default: "",
@@ -217,6 +282,7 @@ variants: [
     // =========================
     // IMAGES
     // =========================
+
     images: {
       type: [String],
       default: [],

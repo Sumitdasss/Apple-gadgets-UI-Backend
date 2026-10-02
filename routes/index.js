@@ -1,9 +1,10 @@
 import express from 'express';
-import { addProduct, getAllProduct } from '../Controller/addproduct.js';
+
 import upload from '../midddlewere/upload.js';
-import { getAllCategories, getCategoryTree,createCategory,getAllChildCategories,createChildCategory,getRootCategories,getChildCategories,getCategoryById,updateCategory,deleteCategory } from '../Controller/Catgorihandelar.js';
+import { addProduct,getAllProduct} from '../Controller/addproduct.js';
 import { receiveWebhook, verifyWebhook } from '../Controller/messengerController.js';
 import { checkFacebookToken } from '../Service/messengerController.js';
+import { createMainCategory, createSubCategory,createChildCategory,createSubChildCategory,getFullCategoryTree } from '../Controller/Catgorihandelar.js';
 const router = express.Router();
 router.post('/addproduct',upload.fields([
   {
@@ -25,32 +26,15 @@ router.get(
   checkFacebookToken
 );
 
-router.get('/getallProduct',getAllProduct);
+router.get("/getALLproducts", getAllProduct);
 
-router.post("/creatcatagori", createCategory);
-router.post("/addchaildcatagory", createChildCategory);
-router.get("/getchaildcatagory", getAllChildCategories);
-
-
-router.get("/getallcatgoris", getAllCategories);
-
-
-router.get("/tree", getCategoryTree);
+router.post("/main",createMainCategory);
+router.post("/sub", createSubCategory);
+router.post("/child", createChildCategory);
+router.post("/sub-child", createSubChildCategory);
+router.get("/tree", getFullCategoryTree);
 
 
-router.get("/root", getRootCategories);
-
-
-router.get("/children/:parentId", getChildCategories);
-
-
-router.get("/:id", getCategoryById);
-
-
-router.put("/:id", updateCategory);
-
-
-router.delete("/:id", deleteCategory);
 
 
 

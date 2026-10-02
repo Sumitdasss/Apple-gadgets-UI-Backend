@@ -1,6 +1,101 @@
 import mongoose from "mongoose";
 import Product from "../Model/Product.js";
-import Category from "../Model/Catagori.js";
+
+import {
+  MainCategory,
+  SubCategory,
+  ChildCategory,
+  SubChildCategory,
+} from "../Model/Catagori.js";
+
+/* =========================================================
+   HELPERS
+========================================================= */
+
+const parseJSON = (value, fallback = []) => {
+  if (
+    value === undefined ||
+    value === null ||
+    value === ""
+  ) {
+    return fallback;
+  }
+
+  if (typeof value !== "string") {
+    return value;
+  }
+
+  try {
+    return JSON.parse(value);
+  } catch (error) {
+    throw new Error(
+      `Invalid JSON data: ${error.message}`
+    );
+  }
+};
+
+const isValidObjectId = (id) => {
+  return mongoose.Types.ObjectId.isValid(id);
+};
+
+const toBoolean = (value) => {
+  return (
+    value === true ||
+    value === "true" ||
+    value === 1 ||
+    value === "1"
+  );
+};
+
+const cleanString = (value) => {
+  if (
+    value === undefined ||
+    value === null
+  ) {
+    return "";
+  }
+
+  return String(value).trim();
+};
+
+const uniqueObjectIds = (ids = []) => {
+  const map = new Map();
+
+  for (const id of ids) {
+    if (!id) continue;
+
+    const stringId = String(id);
+
+    if (!map.has(stringId)) {
+      map.set(stringId, id);
+    }
+  }
+
+  return [...map.values()];
+};
+
+const uniqueStrings = (items = []) => {
+  return [
+    ...new Set(
+      items
+        .filter(
+          (item) =>
+            item !== undefined &&
+            item !== null &&
+            item !== ""
+        )
+        .map((item) =>
+          String(item).trim()
+        )
+        .filter(Boolean)
+    ),
+  ];
+};
+
+/* =========================================================
+   ADD PRODUCT
+========================================================= */
+
 export const addProduct = async (req, res) => {
   try {
     console.log("=================================");
@@ -16,7 +111,6 @@ export const addProduct = async (req, res) => {
       description,
       shortDescription,
 
-      // ⭐ Additional Categories
       additionalCategories,
 
       category,
@@ -51,108 +145,75 @@ export const addProduct = async (req, res) => {
       metaDescription,
     } = req.body;
 
-    // ========================================
-    // REQUIRED FIELDS
-    // ========================================
+    /* =====================================================
+       REQUIRED
+    ===================================================== */
 
-    if (!name?.trim()) {
+    const productName = cleanString(name);
+    const productSlug = cleanString(slug);
+
+    if (!productName) {
       return res.status(400).json({
         success: false,
         message: "Product name is required",
       });
     }
 
-    if (price === undefined || price === "") {
+    if (!productSlug) {
+      return res.status(400).json({
+        success: false,
+        message: "Product slug is required",
+      });
+    }
+
+    if (
+      price === undefined ||
+      price === null ||
+      price === ""
+    ) {
       return res.status(400).json({
         success: false,
         message: "Price is required",
       });
     }
 
-    if (stock === undefined || stock === "") {
+    if (
+      stock === undefined ||
+      stock === null ||
+      stock === ""
+    ) {
       return res.status(400).json({
         success: false,
         message: "Stock is required",
       });
     }
 
-    // ========================================
-    // HELPER: PARSE JSON
-    // ========================================
-
-    const parseJSON = (
-      value,
-      fallback = []
-    ) => {
-      if (
-        value === undefined ||
-        value === null ||
-        value === ""
-      ) {
-        return fallback;
-      }
-
-      // Already array/object হলে
-      if (typeof value !== "string") {
-        return value;
-      }
-
-      try {
-        return JSON.parse(value);
-      } catch (error) {
-        throw new Error(
-          `Invalid JSON data: ${error.message}`
-        );
-      }
-    };
-
-    // ========================================
-    // PARSED JSON FIELDS
-    // ========================================
+    /* =====================================================
+       PARSE JSON
+    ===================================================== */
 
     let parsedColors = [];
     let parsedSizes = [];
     let parsedRam = [];
     let parsedSpecifications = [];
     let parsedVariants = [];
-
-    // ⭐ NEW
     let parsedAdditionalCategories = [];
 
     try {
-      parsedColors =
-        parseJSON(colors, []);
-
-      parsedSizes =
-        parseJSON(sizes, []);
-
-      parsedRam =
-        parseJSON(ram, []);
-
+      parsedColors = parseJSON(colors, []);
+      parsedSizes = parseJSON(sizes, []);
+      parsedRam = parseJSON(ram, []);
       parsedSpecifications =
-        parseJSON(
-          specifications,
-          []
-        );
+        parseJSON(specifications, []);
+      parsedVariants = parseJSON(variants, []);
 
-      parsedVariants =
-        parseJSON(
-          variants,
-          []
-        );
-
-      // ⭐ ADDITIONAL CATEGORIES
       parsedAdditionalCategories =
         parseJSON(
           additionalCategories,
           []
         );
-
     } catch (error) {
-      console.error(
-        "JSON PARSE ERROR:",
-        error
-      );
+      console.error("JSON PARSE ERROR:", error);
 
       return res.status(400).json({
         success: false,
@@ -160,9 +221,9 @@ export const addProduct = async (req, res) => {
       });
     }
 
-    // ========================================
-    // VALIDATE JSON ARRAYS
-    // ========================================
+    /* =====================================================
+       ARRAY VALIDATION
+    ===================================================== */
 
     if (!Array.isArray(parsedColors)) {
       return res.status(400).json({
@@ -185,11 +246,7 @@ export const addProduct = async (req, res) => {
       });
     }
 
-    if (
-      !Array.isArray(
-        parsedSpecifications
-      )
-    ) {
+    if (!Array.isArray(parsedSpecifications)) {
       return res.status(400).json({
         success: false,
         message:
@@ -197,9 +254,7 @@ export const addProduct = async (req, res) => {
       });
     }
 
-    if (
-      !Array.isArray(parsedVariants)
-    ) {
+    if (!Array.isArray(parsedVariants)) {
       return res.status(400).json({
         success: false,
         message:
@@ -207,13 +262,7 @@ export const addProduct = async (req, res) => {
       });
     }
 
-    // ⭐ ADDITIONAL CATEGORIES VALIDATION
-
-    if (
-      !Array.isArray(
-        parsedAdditionalCategories
-      )
-    ) {
+    if (!Array.isArray(parsedAdditionalCategories)) {
       return res.status(400).json({
         success: false,
         message:
@@ -221,30 +270,172 @@ export const addProduct = async (req, res) => {
       });
     }
 
-    // ========================================
-    // DEBUG
-    // ========================================
+    /* =====================================================
+       MAIN CATEGORY
+    ===================================================== */
 
-    console.log(
-      "PARSED ADDITIONAL CATEGORIES:",
-      parsedAdditionalCategories
-    );
-
-    console.log(
-      "PARSED VARIANTS:",
-      parsedVariants
-    );
-
-    // ========================================
-    // VALIDATE VARIANTS
-    // ========================================
-
-    for (
-      const variant of parsedVariants
+    if (
+      !category ||
+      !isValidObjectId(category)
     ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Valid main category is required",
+      });
+    }
+
+    const mainCategory =
+      await MainCategory.findOne({
+        _id: category,
+        isActive: { $ne: false },
+      }).lean();
+
+    if (!mainCategory) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Main category not found or inactive",
+      });
+    }
+
+    /* =====================================================
+       SUB CATEGORY
+    ===================================================== */
+
+    let validatedSubCategory = null;
+
+    if (subCategory) {
+      if (!isValidObjectId(subCategory)) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Invalid sub category",
+        });
+      }
+
+      validatedSubCategory =
+        await SubCategory.findOne({
+          _id: subCategory,
+          mainCategory: category,
+          isActive: { $ne: false },
+        }).lean();
+
+      if (!validatedSubCategory) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Sub category does not belong to selected main category",
+        });
+      }
+    }
+
+    /* =====================================================
+       CHILD CATEGORY
+    ===================================================== */
+
+    let validatedChildCategory = null;
+
+    if (childCategory) {
+      if (!isValidObjectId(childCategory)) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Invalid child category",
+        });
+      }
+
+      if (!subCategory) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Sub category is required for child category",
+        });
+      }
+
+      validatedChildCategory =
+        await ChildCategory.findOne({
+          _id: childCategory,
+          subCategory: subCategory,
+          mainCategory: category,
+          isActive: { $ne: false },
+        }).lean();
+
+      if (!validatedChildCategory) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Child category does not belong to selected sub category",
+        });
+      }
+    }
+
+    /* =====================================================
+       SUB CHILD CATEGORY
+    ===================================================== */
+
+    let validatedSubChildCategory = null;
+
+    if (subChildCategory) {
+      if (
+        !isValidObjectId(subChildCategory)
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Invalid sub-child category",
+        });
+      }
+
+      if (!childCategory) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Child category is required for sub-child category",
+        });
+      }
+
+      validatedSubChildCategory =
+        await SubChildCategory.findOne({
+          _id: subChildCategory,
+          childCategory: childCategory,
+          subCategory: subCategory,
+          mainCategory: category,
+          isActive: { $ne: false },
+        }).lean();
+
+      if (!validatedSubChildCategory) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Sub-child category does not belong to selected child category",
+        });
+      }
+    }
+
+    /* =====================================================
+       ADDITIONAL CATEGORIES
+    ===================================================== */
+
+    const validAdditionalIds =
+      parsedAdditionalCategories.filter(
+        (id) => isValidObjectId(id)
+      );
+
+    const cleanAdditionalCategories =
+      uniqueObjectIds(
+        validAdditionalIds
+      );
+
+    /* =====================================================
+       VARIANTS
+    ===================================================== */
+
+    for (const variant of parsedVariants) {
       if (
         !variant ||
-        typeof variant !== "object"
+        typeof variant !== "object" ||
+        Array.isArray(variant)
       ) {
         return res.status(400).json({
           success: false,
@@ -260,6 +451,17 @@ export const addProduct = async (req, res) => {
         variant.stock = Number(
           variant.stock
         );
+
+        if (
+          Number.isNaN(variant.stock) ||
+          variant.stock < 0
+        ) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "Invalid variant stock",
+          });
+        }
       }
 
       if (
@@ -269,6 +471,17 @@ export const addProduct = async (req, res) => {
         variant.price = Number(
           variant.price
         );
+
+        if (
+          Number.isNaN(variant.price) ||
+          variant.price < 0
+        ) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "Invalid variant price",
+          });
+        }
       }
 
       if (
@@ -298,82 +511,59 @@ export const addProduct = async (req, res) => {
         ).trim();
       }
 
-      // ====================================
-      // VARIANT COLOR NORMALIZE
-      // ====================================
-
       if (
         variant.color &&
         typeof variant.color === "object"
       ) {
         variant.color = {
-          name:
-            variant.color.name || "",
+          name: String(
+            variant.color.name || ""
+          ).trim(),
 
           code:
             variant.color.code ||
             "#000000",
+
+          image:
+            variant.color.image ||
+            "",
         };
       }
     }
 
-    // ========================================
-    // CHECK DUPLICATE SLUG
-    // ========================================
+    /* =====================================================
+       DUPLICATE SLUG
+    ===================================================== */
 
     const existingProduct =
       await Product.findOne({
-        slug: slug.trim(),
-      });
+        slug: productSlug,
+      }).lean();
 
     if (existingProduct) {
       return res.status(400).json({
         success: false,
         message:
-          `Product with slug "${slug}" already exists`,
+          `Product with slug "${productSlug}" already exists`,
       });
     }
 
-    // ========================================
-    // GET PRODUCT IMAGE FILES
-    // ========================================
+    /* =====================================================
+       IMAGES
+    ===================================================== */
 
     const productImageFiles =
       req.files?.images || [];
 
-    // ========================================
-    // GET COLOR IMAGE FILES
-    // ========================================
-
     const colorImageFiles =
       req.files?.colorImages || [];
-
-    console.log(
-      "PRODUCT IMAGE COUNT:",
-      productImageFiles.length
-    );
-
-    console.log(
-      "COLOR IMAGE COUNT:",
-      colorImageFiles.length
-    );
-
-    // ========================================
-    // PRODUCT IMAGE URLS
-    // ========================================
 
     const uploadedImages =
       productImageFiles.map(
         (file) => file.path
       );
 
-    // ========================================
-    // PRODUCT IMAGE REQUIRED
-    // ========================================
-
-    if (
-      uploadedImages.length === 0
-    ) {
+    if (uploadedImages.length === 0) {
       return res.status(400).json({
         success: false,
         message:
@@ -381,24 +571,21 @@ export const addProduct = async (req, res) => {
       });
     }
 
-    // ========================================
-    // COLOR IMAGE URLS
-    // ========================================
-
     const uploadedColorImages =
       colorImageFiles.map(
         (file) => file.path
       );
 
-    // ========================================
-    // FINAL COLORS
-    // ========================================
+    /* =====================================================
+       COLORS
+    ===================================================== */
 
     const finalColors =
       parsedColors.map(
         (color, index) => ({
-          name:
-            color?.name || "",
+          name: cleanString(
+            color?.name
+          ),
 
           code:
             color?.code ||
@@ -411,17 +598,11 @@ export const addProduct = async (req, res) => {
         })
       );
 
-    console.log(
-      "FINAL COLORS:",
-      finalColors
-    );
+    /* =====================================================
+       PRICE
+    ===================================================== */
 
-    // ========================================
-    // PRICE
-    // ========================================
-
-    const productPrice =
-      Number(price);
+    const productPrice = Number(price);
 
     if (
       Number.isNaN(productPrice) ||
@@ -434,12 +615,13 @@ export const addProduct = async (req, res) => {
       });
     }
 
-    // ========================================
-    // DISCOUNT PRICE
-    // ========================================
+    /* =====================================================
+       DISCOUNT PRICE
+    ===================================================== */
 
     const productDiscountPrice =
       discountPrice !== undefined &&
+      discountPrice !== null &&
       discountPrice !== ""
         ? Number(discountPrice)
         : null;
@@ -460,9 +642,22 @@ export const addProduct = async (req, res) => {
       });
     }
 
-    // ========================================
-    // CALCULATE DISCOUNT %
-    // ========================================
+    if (
+      productDiscountPrice !== null &&
+      productDiscountPrice >=
+        productPrice &&
+      productPrice > 0
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Discount price must be lower than product price",
+      });
+    }
+
+    /* =====================================================
+       DISCOUNT %
+    ===================================================== */
 
     let calculatedDiscountPercentage = 0;
 
@@ -479,31 +674,43 @@ export const addProduct = async (req, res) => {
             productDiscountPrice
           ) /
           productPrice
-        ) * 100;
+        ) *
+        100;
     }
 
-    // ========================================
-    // FINAL DISCOUNT %
-    // ========================================
+    let finalDiscountPercentage =
+      Number(
+        calculatedDiscountPercentage.toFixed(2)
+      );
 
-    const finalDiscountPercentage =
+    if (
       discountPercentage !== undefined &&
       discountPercentage !== ""
-        ? Number(
-            discountPercentage
-          )
-        : Number(
-            calculatedDiscountPercentage.toFixed(
-              2
-            )
-          );
+    ) {
+      const manuallyEntered =
+        Number(discountPercentage);
 
-    // ========================================
-    // STOCK
-    // ========================================
+      if (
+        Number.isNaN(manuallyEntered) ||
+        manuallyEntered < 0 ||
+        manuallyEntered > 100
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Invalid discount percentage",
+        });
+      }
 
-    const productStock =
-      Number(stock);
+      finalDiscountPercentage =
+        manuallyEntered;
+    }
+
+    /* =====================================================
+       STOCK
+    ===================================================== */
+
+    const productStock = Number(stock);
 
     if (
       Number.isNaN(productStock) ||
@@ -516,9 +723,9 @@ export const addProduct = async (req, res) => {
       });
     }
 
-    // ========================================
-    // RATING
-    // ========================================
+    /* =====================================================
+       RATING
+    ===================================================== */
 
     const productRating =
       rating !== undefined &&
@@ -526,35 +733,39 @@ export const addProduct = async (req, res) => {
         ? Number(rating)
         : 0;
 
-    // ========================================
-    // CREATE PRODUCT
-    // ========================================
+    if (
+      Number.isNaN(productRating) ||
+      productRating < 0 ||
+      productRating > 5
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Rating must be between 0 and 5",
+      });
+    }
+
+    /* =====================================================
+       CREATE PRODUCT
+    ===================================================== */
 
     const product =
       await Product.create({
+        name: productName,
 
-        // ====================================
-        // BASIC
-        // ====================================
-
-        name:
-          name.trim(),
-
-        slug:
-          slug.trim(),
+        slug: productSlug,
 
         description:
-          description.trim(),
+          cleanString(description),
 
         shortDescription:
-          shortDescription?.trim() ||
-          "",
+          cleanString(
+            shortDescription
+          ),
 
-        // ====================================
-        // CATEGORY
-        // ====================================
+        // 4 LEVEL CATEGORY
 
-        category,
+        category: category,
 
         subCategory:
           subCategory || null,
@@ -565,26 +776,19 @@ export const addProduct = async (req, res) => {
         subChildCategory:
           subChildCategory || null,
 
-        // ====================================
-        // ⭐ ADDITIONAL CATEGORIES
-        // ====================================
+        // ADDITIONAL
 
         additionalCategories:
-          parsedAdditionalCategories,
+          cleanAdditionalCategories,
 
-        // ====================================
         // BRAND
-        // ====================================
 
         brand:
-          brand?.trim() || "",
+          cleanString(brand),
 
-        // ====================================
         // PRICE
-        // ====================================
 
-        price:
-          productPrice,
+        price: productPrice,
 
         discountPrice:
           productDiscountPrice,
@@ -592,103 +796,72 @@ export const addProduct = async (req, res) => {
         discountPercentage:
           finalDiscountPercentage,
 
-        // ====================================
         // STOCK
-        // ====================================
 
-        stock:
-          productStock,
-
-        // ====================================
-        // SKU
-        // ====================================
+        stock: productStock,
 
         sku:
-          sku?.trim() || "",
+          cleanString(sku),
 
-        // ====================================
         // COLORS
-        // ====================================
 
-        colors:
-          finalColors,
+        colors: finalColors,
 
-        // ====================================
         // SIZES
-        // ====================================
 
-        sizes:
-          parsedSizes,
+        sizes: uniqueStrings(
+          parsedSizes
+        ),
 
-        // ====================================
         // RAM
-        // ====================================
 
-        ram:
-          parsedRam,
+        ram: uniqueStrings(
+          parsedRam
+        ),
 
-        // ====================================
         // SPECIFICATIONS
-        // ====================================
 
         specifications:
           parsedSpecifications,
 
-        // ====================================
         // VARIANTS
-        // ====================================
 
-        variants:
-          parsedVariants,
+        variants: parsedVariants,
 
-        // ====================================
         // RATING
-        // ====================================
 
-        rating:
-          productRating,
+        rating: productRating,
 
-        // ====================================
         // STATUS
-        // ====================================
 
         isActive:
-          isActive === "true" ||
-          isActive === true,
+          isActive === undefined
+            ? true
+            : toBoolean(isActive),
 
         isFeatured:
-          isFeatured === "true" ||
-          isFeatured === true,
+          toBoolean(isFeatured),
 
         isNew:
-          isNew === "true" ||
-          isNew === true,
+          toBoolean(isNew),
 
         isBestSeller:
-          isBestSeller === "true" ||
-          isBestSeller === true,
+          toBoolean(isBestSeller),
 
-        // ====================================
         // SEO
-        // ====================================
 
         metaTitle:
-          metaTitle?.trim() || "",
+          cleanString(metaTitle),
 
         metaDescription:
-          metaDescription?.trim() || "",
+          cleanString(
+            metaDescription
+          ),
 
-        // ====================================
         // IMAGES
-        // ====================================
 
-        images:
-          uploadedImages,
+        images: uploadedImages,
       });
-
-    // ========================================
-    // SUCCESS
-    // ========================================
 
     console.log(
       "PRODUCT CREATED:",
@@ -697,21 +870,17 @@ export const addProduct = async (req, res) => {
 
     return res.status(201).json({
       success: true,
-
       message:
         "Product added successfully",
-
       product,
     });
-
   } catch (error) {
-
     console.error(
       "================================="
     );
 
     console.error(
-      "ADD PRODUCT ERROR:"
+      "ADD PRODUCT ERROR"
     );
 
     console.error(error);
@@ -720,87 +889,69 @@ export const addProduct = async (req, res) => {
       "================================="
     );
 
-    // ========================================
-    // DUPLICATE KEY ERROR
-    // ========================================
-
     if (error.code === 11000) {
-
       const duplicateField =
         Object.keys(
           error.keyPattern || {}
-        )[0];
+        )[0] || "field";
 
       return res.status(400).json({
         success: false,
-
         message:
           `${duplicateField} already exists`,
       });
     }
 
-    // ========================================
-    // VALIDATION ERROR
-    // ========================================
-
     if (
       error.name ===
       "ValidationError"
     ) {
-
       return res.status(400).json({
         success: false,
-
         message:
           "Product validation failed",
 
         errors:
           Object.values(
             error.errors
-          ).map(
-            (err) => ({
-              field: err.path,
-              message: err.message,
-              value: err.value,
-            })
-          ),
+          ).map((err) => ({
+            field: err.path,
+            message: err.message,
+            value: err.value,
+          })),
       });
     }
-
-    // ========================================
-    // CAST ERROR
-    // ========================================
 
     if (
       error.name ===
       "CastError"
     ) {
-
       return res.status(400).json({
         success: false,
-
         message:
           `Invalid value for ${error.path}`,
 
-        error:
-          error.message,
+        error: error.message,
       });
     }
 
-    // ========================================
-    // GENERAL ERROR
-    // ========================================
-
     return res.status(500).json({
       success: false,
-
       message:
         error.message ||
         "Failed to add product",
     });
   }
 };
-export const getAllProduct = async (req, res) => {
+
+/* =========================================================
+   GET ALL PRODUCTS
+========================================================= */
+
+export const getAllProduct = async (
+  req,
+  res
+) => {
   try {
     const {
       category = "",
@@ -811,33 +962,122 @@ export const getAllProduct = async (req, res) => {
       sort = "newest",
     } = req.query;
 
-    // =================================================
-    // BASE FILTER
-    // =================================================
+    /* =====================================================
+       SAFE QUERY VALUES
+    ===================================================== */
+
+    const categoryQuery =
+      typeof category === "string"
+        ? category.trim()
+        : "";
+
+    const brandQuery =
+      typeof brand === "string"
+        ? brand.trim()
+        : "";
+
+    const minPriceQuery =
+      typeof minPrice === "string"
+        ? minPrice.trim()
+        : "";
+
+    const maxPriceQuery =
+      typeof maxPrice === "string"
+        ? maxPrice.trim()
+        : "";
+
+    const stockQuery =
+      typeof stock === "string"
+        ? stock.trim()
+        : "";
+
+    const sortQuery =
+      typeof sort === "string"
+        ? sort.trim()
+        : "newest";
 
     const filter = {};
 
-    // =================================================
-    // CATEGORY FILTER
-    // =================================================
+    /* =====================================================
+       CATEGORY FILTER
+    ===================================================== */
 
-    if (category.trim()) {
-      const slug = category.trim().toLowerCase();
+    if (categoryQuery) {
+      const slug =
+        categoryQuery.toLowerCase();
 
-      // =================================================
-      // FIND CATEGORY
-      // =================================================
+      let categoryData = null;
+      let categoryLevel = null;
 
-      const categoryData = await Category.findOne({
-        slug: slug,
-        isActive: true,
-      })
-        .select("_id name slug parent level path")
-        .lean();
+      /* MAIN */
 
-      // =================================================
-      // CATEGORY NOT FOUND
-      // =================================================
+      categoryData =
+        await MainCategory.findOne({
+          slug,
+          isActive: { $ne: false },
+        })
+          .select("_id name slug")
+          .lean();
+
+      if (categoryData) {
+        categoryLevel = "main";
+      }
+
+      /* SUB */
+
+      if (!categoryData) {
+        categoryData =
+          await SubCategory.findOne({
+            slug,
+            isActive: { $ne: false },
+          })
+            .select(
+              "_id name slug mainCategory"
+            )
+            .lean();
+
+        if (categoryData) {
+          categoryLevel = "sub";
+        }
+      }
+
+      /* CHILD */
+
+      if (!categoryData) {
+        categoryData =
+          await ChildCategory.findOne({
+            slug,
+            isActive: { $ne: false },
+          })
+            .select(
+              "_id name slug mainCategory subCategory"
+            )
+            .lean();
+
+        if (categoryData) {
+          categoryLevel = "child";
+        }
+      }
+
+      /* SUB CHILD */
+
+      if (!categoryData) {
+        categoryData =
+          await SubChildCategory.findOne({
+            slug,
+            isActive: { $ne: false },
+          })
+            .select(
+              "_id name slug mainCategory subCategory childCategory"
+            )
+            .lean();
+
+        if (categoryData) {
+          categoryLevel = "subChild";
+        }
+      }
+
+      /* NOT FOUND */
 
       if (!categoryData) {
         return res.status(200).json({
@@ -845,6 +1085,7 @@ export const getAllProduct = async (req, res) => {
           count: 0,
           products: [],
           category: null,
+
           filters: {
             brands: [],
             series: [],
@@ -852,6 +1093,7 @@ export const getAllProduct = async (req, res) => {
             storage: [],
             processors: [],
             colors: [],
+
             price: {
               min: 0,
               max: 0,
@@ -860,48 +1102,132 @@ export const getAllProduct = async (req, res) => {
         });
       }
 
-      // =================================================
-      // CURRENT CATEGORY ID
-      // =================================================
-
-      const currentCategoryId = categoryData._id;
-
-      // =================================================
-      // FIND CHILD CATEGORIES
-      // =================================================
-
-      const children = await Category.find({
-        parent: currentCategoryId,
-        isActive: true,
-      })
-        .select("_id")
-        .lean();
-
-      // =================================================
-      // CATEGORY IDS
-      // =================================================
+      /* =================================================
+         CATEGORY IDS
+      ================================================= */
 
       const categoryIds = [
-        currentCategoryId,
-        ...children.map((item) => item._id),
+        categoryData._id,
       ];
 
-      // =================================================
-      // REMOVE DUPLICATES
-      // =================================================
+      /* MAIN */
 
-      const uniqueCategoryIds = [
-        ...new Map(
-          categoryIds.map((id) => [
-            String(id),
-            id,
-          ])
-        ).values(),
-      ];
+      if (categoryLevel === "main") {
+        const subCategories =
+          await SubCategory.find({
+            mainCategory:
+              categoryData._id,
+            isActive: {
+              $ne: false,
+            },
+          })
+            .select("_id")
+            .lean();
 
-      // =================================================
-      // DEBUG
-      // =================================================
+        categoryIds.push(
+          ...subCategories.map(
+            (item) => item._id
+          )
+        );
+
+        const childCategories =
+          await ChildCategory.find({
+            mainCategory:
+              categoryData._id,
+            isActive: {
+              $ne: false,
+            },
+          })
+            .select("_id")
+            .lean();
+
+        categoryIds.push(
+          ...childCategories.map(
+            (item) => item._id
+          )
+        );
+
+        const subChildCategories =
+          await SubChildCategory.find({
+            mainCategory:
+              categoryData._id,
+            isActive: {
+              $ne: false,
+            },
+          })
+            .select("_id")
+            .lean();
+
+        categoryIds.push(
+          ...subChildCategories.map(
+            (item) => item._id
+          )
+        );
+      }
+
+      /* SUB */
+
+      if (categoryLevel === "sub") {
+        const childCategories =
+          await ChildCategory.find({
+            subCategory:
+              categoryData._id,
+            isActive: {
+              $ne: false,
+            },
+          })
+            .select("_id")
+            .lean();
+
+        categoryIds.push(
+          ...childCategories.map(
+            (item) => item._id
+          )
+        );
+
+        const subChildCategories =
+          await SubChildCategory.find({
+            subCategory:
+              categoryData._id,
+            isActive: {
+              $ne: false,
+            },
+          })
+            .select("_id")
+            .lean();
+
+        categoryIds.push(
+          ...subChildCategories.map(
+            (item) => item._id
+          )
+        );
+      }
+
+      /* CHILD */
+
+      if (categoryLevel === "child") {
+        const subChildCategories =
+          await SubChildCategory.find({
+            childCategory:
+              categoryData._id,
+            isActive: {
+              $ne: false,
+            },
+          })
+            .select("_id")
+            .lean();
+
+        categoryIds.push(
+          ...subChildCategories.map(
+            (item) => item._id
+          )
+        );
+      }
+
+      const uniqueCategoryIds =
+        uniqueObjectIds(
+          categoryIds
+        );
 
       console.log(
         "======================================"
@@ -918,93 +1244,107 @@ export const getAllProduct = async (req, res) => {
       );
 
       console.log(
-        "CATEGORY ID:",
-        String(currentCategoryId)
-      );
-
-      console.log(
         "CATEGORY LEVEL:",
-        categoryData.level
+        categoryLevel
       );
 
       console.log(
         "CATEGORY IDS:",
-        uniqueCategoryIds.map((id) =>
-          String(id)
+        uniqueCategoryIds.map(
+          (id) => String(id)
         )
-      );
-
-      // =================================================
-      // IMPORTANT DEBUG
-      // =================================================
-
-      const additionalCategoryCount =
-        await Product.countDocuments({
-          additionalCategories:
-            currentCategoryId,
-        });
-
-      console.log(
-        "ADDITIONAL CATEGORY PRODUCT COUNT:",
-        additionalCategoryCount
       );
 
       console.log(
         "======================================"
       );
 
-      // =================================================
-      // ⭐ CATEGORY PRODUCT FILTER
-      // =================================================
+      /* =================================================
+         CATEGORY FIELD SPECIFIC FILTER
+      ================================================= */
 
-      filter.$or = [
-        // Product category
-        {
-          category: {
-            $in: uniqueCategoryIds,
+      if (categoryLevel === "main") {
+        filter.$or = [
+          {
+            category:
+              categoryData._id,
           },
-        },
+          {
+            additionalCategories:
+              categoryData._id,
+          },
+        ];
+      }
 
-        // Product subCategory
-        {
-          subCategory: {
-            $in: uniqueCategoryIds,
+      if (categoryLevel === "sub") {
+        filter.$or = [
+          {
+            subCategory:
+              categoryData._id,
           },
-        },
+          {
+            childCategory: {
+              $in: uniqueCategoryIds,
+            },
+          },
+          {
+            subChildCategory: {
+              $in: uniqueCategoryIds,
+            },
+          },
+          {
+            additionalCategories:
+              categoryData._id,
+          },
+        ];
+      }
 
-        // Product childCategory
-        {
-          childCategory: {
-            $in: uniqueCategoryIds,
+      if (categoryLevel === "child") {
+        filter.$or = [
+          {
+            childCategory:
+              categoryData._id,
           },
-        },
+          {
+            subChildCategory: {
+              $in: uniqueCategoryIds,
+            },
+          },
+          {
+            additionalCategories:
+              categoryData._id,
+          },
+        ];
+      }
 
-        // Product subChildCategory
-        {
-          subChildCategory: {
-            $in: uniqueCategoryIds,
+      if (
+        categoryLevel === "subChild"
+      ) {
+        filter.$or = [
+          {
+            subChildCategory:
+              categoryData._id,
           },
-        },
-
-        // ⭐ VERY IMPORTANT
-        // additionalCategories
-        {
-          additionalCategories: {
-            $in: uniqueCategoryIds,
+          {
+            additionalCategories:
+              categoryData._id,
           },
-        },
-      ];
+        ];
+      }
     }
 
-    // =================================================
-    // BRAND FILTER
-    // =================================================
+    /* =====================================================
+       BRAND
+    ===================================================== */
 
-    if (brand.trim()) {
-      const brands = brand
-        .split(",")
-        .map((item) => item.trim())
-        .filter(Boolean);
+    if (brandQuery) {
+      const brands =
+        brandQuery
+          .split(",")
+          .map((item) =>
+            item.trim()
+          )
+          .filter(Boolean);
 
       if (brands.length > 0) {
         filter.brand = {
@@ -1013,64 +1353,162 @@ export const getAllProduct = async (req, res) => {
       }
     }
 
-    // =================================================
-    // PRICE FILTER
-    // =================================================
+    /* =====================================================
+       PRICE
+    ===================================================== */
 
-    if (minPrice || maxPrice) {
-      filter.discountPrice = {};
+    if (
+      minPriceQuery ||
+      maxPriceQuery
+    ) {
+      const min =
+        minPriceQuery
+          ? Number(minPriceQuery)
+          : null;
 
-      if (minPrice) {
-        filter.discountPrice.$gte =
-          Number(minPrice);
+      const max =
+        maxPriceQuery
+          ? Number(maxPriceQuery)
+          : null;
+
+      if (
+        min !== null &&
+        Number.isNaN(min)
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Invalid minimum price",
+        });
       }
 
-      if (maxPrice) {
-        filter.discountPrice.$lte =
-          Number(maxPrice);
+      if (
+        max !== null &&
+        Number.isNaN(max)
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Invalid maximum price",
+        });
+      }
+
+      const priceConditions = [];
+
+      if (min !== null) {
+        priceConditions.push({
+          $gte: [
+            {
+              $cond: [
+                {
+                  $and: [
+                    {
+                      $ne: [
+                        "$discountPrice",
+                        null,
+                      ],
+                    },
+                    {
+                      $lt: [
+                        "$discountPrice",
+                        "$price",
+                      ],
+                    },
+                  ],
+                },
+                "$discountPrice",
+                "$price",
+              ],
+            },
+            min,
+          ],
+        });
+      }
+
+      if (max !== null) {
+        priceConditions.push({
+          $lte: [
+            {
+              $cond: [
+                {
+                  $and: [
+                    {
+                      $ne: [
+                        "$discountPrice",
+                        null,
+                      ],
+                    },
+                    {
+                      $lt: [
+                        "$discountPrice",
+                        "$price",
+                      ],
+                    },
+                  ],
+                },
+                "$discountPrice",
+                "$price",
+              ],
+            },
+            max,
+          ],
+        });
+      }
+
+      if (priceConditions.length > 0) {
+        filter.$expr = {
+          $and: priceConditions,
+        };
       }
     }
 
-    // =================================================
-    // STOCK FILTER
-    // =================================================
+    /* =====================================================
+       STOCK
+    ===================================================== */
 
-    if (stock === "in-stock") {
+    if (
+      stockQuery === "in-stock"
+    ) {
       filter.stock = {
         $gt: 0,
       };
     }
 
-    if (stock === "out-of-stock") {
+    if (
+      stockQuery === "out-of-stock"
+    ) {
       filter.stock = {
         $lte: 0,
       };
     }
 
-    // =================================================
-    // SORT
-    // =================================================
+    /* =====================================================
+       SORT
+    ===================================================== */
 
     let sortOption = {
       createdAt: -1,
     };
 
-    switch (sort) {
+    switch (sortQuery) {
       case "price-low":
         sortOption = {
           discountPrice: 1,
+          price: 1,
         };
         break;
 
       case "price-high":
         sortOption = {
           discountPrice: -1,
+          price: -1,
         };
         break;
 
       case "rating":
         sortOption = {
           rating: -1,
+          createdAt: -1,
         };
         break;
 
@@ -1088,179 +1526,277 @@ export const getAllProduct = async (req, res) => {
         break;
     }
 
-    // =================================================
-    // GET PRODUCTS
-    // =================================================
+    /* =====================================================
+       GET PRODUCTS
+    ===================================================== */
 
-    const products = await Product.find(filter)
-      .populate(
-        "category",
-        "name slug level parent"
-      )
-      .populate(
-        "subCategory",
-        "name slug level parent"
-      )
-      .populate(
-        "childCategory",
-        "name slug level parent"
-      )
-      .populate(
-        "subChildCategory",
-        "name slug level parent"
-      )
-      .populate(
-        "additionalCategories",
-        "name slug level parent"
-      )
-      .sort(sortOption)
-      .lean();
+    const products =
+      await Product.find(filter)
+        .populate({
+          path: "category",
+          model: "MainCategory",
+        })
+        .populate({
+          path: "subCategory",
+          model: "SubCategory",
+        })
+        .populate({
+          path: "childCategory",
+          model: "ChildCategory",
+        })
+        .populate({
+          path: "subChildCategory",
+          model: "SubChildCategory",
+        })
+        .populate({
+          path: "additionalCategories",
+          model: "MainCategory",
+        })
+        .sort(sortOption)
+        .lean();
 
-    // =================================================
-    // UNIQUE
-    // =================================================
+    /* =====================================================
+       FILTER DATA
+    ===================================================== */
 
-    const unique = (items) => {
-      return [
-        ...new Set(
-          items
-            .filter(
-              (item) =>
-                item !== undefined &&
-                item !== null &&
-                item !== ""
-            )
-            .map((item) =>
-              String(item).trim()
-            )
-        ),
-      ];
-    };
-
-    // =================================================
-    // FILTER DATA
-    // =================================================
-
-    const brands = unique(
-      products.map(
-        (product) => product.brand
-      )
-    );
-
-    const series = unique(
-      products.map(
-        (product) => product.series
-      )
-    );
-
-    const displaySizes = unique(
-      products.map(
-        (product) =>
-          product.displaySize ||
-          product.display ||
-          product.screenSize
-      )
-    );
-
-    const storage = unique(
-      products.map(
-        (product) => product.storage
-      )
-    );
-
-    const processors = unique(
-      products.map(
-        (product) => product.processor
-      )
-    );
-
-    const colors = unique(
-      products.flatMap(
-        (product) =>
-          Array.isArray(product.colors)
-            ? product.colors.map(
-                (color) =>
-                  typeof color === "string"
-                    ? color
-                    : color?.name
-              )
-            : []
-      )
-    );
-
-    // =================================================
-    // PRICE RANGE
-    // =================================================
-
-    const prices = products
-      .map(
-        (product) =>
-          Number(
-            product.discountPrice ||
-              product.price ||
-              0
-          )
-      )
-      .filter(
-        (price) => price > 0
+    const brands =
+      uniqueStrings(
+        products.map(
+          (product) =>
+            product.brand
+        )
       );
 
+    const series =
+      uniqueStrings(
+        products.map(
+          (product) =>
+            product.series
+        )
+      );
+
+    const displaySizes =
+      uniqueStrings(
+        products.map(
+          (product) =>
+            product.displaySize ||
+            product.display ||
+            product.screenSize
+        )
+      );
+
+    /* =====================================================
+       STORAGE
+    ===================================================== */
+
+    const storage =
+      uniqueStrings(
+        products.flatMap(
+          (product) => {
+            if (
+              Array.isArray(
+                product.variants
+              )
+            ) {
+              return product.variants
+                .map(
+                  (variant) =>
+                    variant?.storage
+                )
+                .filter(Boolean);
+            }
+
+            if (
+              Array.isArray(
+                product.storage
+              )
+            ) {
+              return product.storage;
+            }
+
+            return product.storage
+              ? [product.storage]
+              : [];
+          }
+        )
+      );
+
+    /* =====================================================
+       PROCESSORS
+    ===================================================== */
+
+    const processors =
+      uniqueStrings(
+        products.map(
+          (product) =>
+            product.processor
+        )
+      );
+
+    /* =====================================================
+       COLORS
+    ===================================================== */
+
+    const colors =
+      uniqueStrings(
+        products.flatMap(
+          (product) =>
+            Array.isArray(
+              product.colors
+            )
+              ? product.colors
+                  .map(
+                    (color) =>
+                      typeof color ===
+                      "string"
+                        ? color
+                        : color?.name
+                  )
+                  .filter(Boolean)
+              : []
+        )
+      );
+
+    /* =====================================================
+       PRICE RANGE
+    ===================================================== */
+
+    const prices =
+      products
+        .map((product) => {
+          const discount =
+            Number(
+              product.discountPrice
+            );
+
+          const regular =
+            Number(product.price);
+
+          if (
+            Number.isFinite(discount) &&
+            discount > 0 &&
+            discount < regular
+          ) {
+            return discount;
+          }
+
+          return regular;
+        })
+        .filter(
+          (price) =>
+            Number.isFinite(price) &&
+            price > 0
+        );
+
     const minProductPrice =
-      prices.length
+      prices.length > 0
         ? Math.min(...prices)
         : 0;
 
     const maxProductPrice =
-      prices.length
+      prices.length > 0
         ? Math.max(...prices)
         : 0;
 
-    // =================================================
-    // SELECTED CATEGORY
-    // =================================================
+    /* =====================================================
+       SELECTED CATEGORY
+    ===================================================== */
 
     let selectedCategory = null;
 
-    if (category.trim()) {
+    if (categoryQuery) {
+      const slug =
+        categoryQuery.toLowerCase();
+
       selectedCategory =
-        await Category.findOne({
-          slug: category
-            .trim()
-            .toLowerCase(),
-          isActive: true,
+        await MainCategory.findOne({
+          slug,
+          isActive: {
+            $ne: false,
+          },
         })
           .select(
-            "name slug level parent path"
+            "name slug"
           )
           .lean();
+
+      if (!selectedCategory) {
+        selectedCategory =
+          await SubCategory.findOne({
+            slug,
+            isActive: {
+              $ne: false,
+            },
+          })
+            .select(
+              "name slug mainCategory"
+            )
+            .lean();
+      }
+
+      if (!selectedCategory) {
+        selectedCategory =
+          await ChildCategory.findOne({
+            slug,
+            isActive: {
+              $ne: false,
+            },
+          })
+            .select(
+              "name slug mainCategory subCategory"
+            )
+            .lean();
+      }
+
+      if (!selectedCategory) {
+        selectedCategory =
+          await SubChildCategory.findOne({
+            slug,
+            isActive: {
+              $ne: false,
+            },
+          })
+            .select(
+              "name slug mainCategory subCategory childCategory"
+            )
+            .lean();
+      }
     }
 
-    // =================================================
-    // RESPONSE
-    // =================================================
+    /* =====================================================
+       RESPONSE
+    ===================================================== */
 
     return res.status(200).json({
       success: true,
 
-      count: products.length,
+      count:
+        products.length,
 
       products,
 
-      category: selectedCategory
-        ? {
-            name:
-              selectedCategory.name,
+      category:
+        selectedCategory
+          ? {
+              name:
+                selectedCategory.name,
 
-            slug:
-              selectedCategory.slug,
+              slug:
+                selectedCategory.slug,
 
-            level:
-              selectedCategory.level,
+              mainCategory:
+                selectedCategory.mainCategory ||
+                null,
 
-            parent:
-              selectedCategory.parent,
-          }
-        : null,
+              subCategory:
+                selectedCategory.subCategory ||
+                null,
+
+              childCategory:
+                selectedCategory.childCategory ||
+                null,
+            }
+          : null,
 
       filters: {
         brands,
@@ -1276,21 +1812,42 @@ export const getAllProduct = async (req, res) => {
         colors,
 
         price: {
-          min: minProductPrice,
-          max: maxProductPrice,
+          min:
+            minProductPrice,
+
+          max:
+            maxProductPrice,
         },
       },
     });
   } catch (error) {
     console.error(
-      "Get all product error:",
-      error
+      "======================================"
+    );
+
+    console.error(
+      "GET ALL PRODUCT ERROR"
+    );
+
+    console.error(error);
+
+    console.error(
+      "MESSAGE:",
+      error.message
+    );
+
+    console.error(
+      "======================================"
     );
 
     return res.status(500).json({
       success: false,
-      message: "Failed to get products",
-      error: error.message,
+
+      message:
+        "Failed to get products",
+
+      error:
+        error.message,
     });
   }
 };

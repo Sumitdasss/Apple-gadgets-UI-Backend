@@ -5,6 +5,7 @@ import { addProduct,getAllProduct} from '../Controller/addproduct.js';
 import { receiveWebhook, verifyWebhook } from '../Controller/messengerController.js';
 import { checkFacebookToken } from '../Service/messengerController.js';
 import { createMainCategory, createSubCategory,createChildCategory,createSubChildCategory,getFullCategoryTree } from '../Controller/Catgorihandelar.js';
+import { createOrder } from '../Controller/CREATODER.js';
 const router = express.Router();
 router.post('/addproduct',upload.fields([
   {
@@ -27,6 +28,7 @@ router.get(
 );
 
 router.get("/getALLproducts", getAllProduct);
+router.post("/CreateOrder", createOrder);
 
 router.post("/main",createMainCategory);
 router.post("/sub", createSubCategory);

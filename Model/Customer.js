@@ -1,43 +1,31 @@
 import mongoose from "mongoose"
 
-const customerSchema = new mongoose.Schema(
-  {
-    messengerId: {
-      type: String,
-      required: true,
-      unique: true,
-    },
-
-    name: {
-      type: String,
-      default: "",
-    },
-
-    phone: {
-      type: String,
-      default: "",
-    },
-
-    address: {
-      type: String,
-      default: "",
-    },
-
-    email: {
-      type: String,
-      default: "",
-    },
-
-    source: {
-      type: String,
-      default: "facebook_messenger",
-    },
+const customerSchema = new mongoose.Schema({
+  name: {
+    type: String,
+    required: true,
+    trim: true,
   },
-  {
-    timestamps: true,
-  }
-);
 
+  email: {
+    type: String,
+    default: "",
+    trim: true,
+    lowercase: true,
+  },
+
+  phone: {
+    type: String,
+    required: true,
+    trim: true,
+  },
+
+  address: {
+    type: String,
+    default: "",
+    trim: true,
+  },
+});
  const Customer =
   mongoose.models.Customer ||
   mongoose.model("Customer", customerSchema);

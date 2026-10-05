@@ -327,8 +327,15 @@ export const getDashboardSummary = async (req, res) => {
       })
       .limit(4)
       .lean();
+// =======================================================
+// TOP SELLING PRODUCTS - SELECTED DATE
+// =======================================================
+
+// =======================================================
+// TOP SELLING PRODUCTS - SELECTED DATE
+// =======================================================
+
 const topProducts = await MainOrder.aggregate([
-  // Selected date-এর order
   {
     $match: {
       createdAt: {
@@ -338,18 +345,18 @@ const topProducts = await MainOrder.aggregate([
     },
   },
 
-  // Order-এর items আলাদা করা
+  // products array খুলবে
   {
-    $unwind: "$items",
+    $unwind: "$products",
   },
 
-  // Product অনুযায়ী quantity যোগ করা
+  // product অনুযায়ী quantity যোগ করবে
   {
     $group: {
-      _id: "$items.product",
+      _id: "$products.product",
       sold: {
         $sum: {
-          $ifNull: ["$items.quantity", 0],
+          $ifNull: ["$products.quantity", 1],
         },
       },
     },
@@ -362,12 +369,11 @@ const topProducts = await MainOrder.aggregate([
     },
   },
 
-  // Top 4
   {
     $limit: 4,
   },
 
-  // Product collection থেকে details আনা
+  // Product collection থেকে information
   {
     $lookup: {
       from: "products",
@@ -381,19 +387,13 @@ const topProducts = await MainOrder.aggregate([
     $unwind: "$product",
   },
 
-  // Dashboard-এর জন্য data তৈরি
   {
     $project: {
       _id: 0,
 
       id: "$product._id",
 
-      name: {
-        $ifNull: [
-          "$product.name",
-          "$product.title",
-        ],
-      },
+      name: "$product.name",
 
       image: {
         $ifNull: [
@@ -412,12 +412,7 @@ const topProducts = await MainOrder.aggregate([
       price: {
         $ifNull: [
           "$product.discountPrice",
-          {
-            $ifNull: [
-              "$product.salePrice",
-              "$product.price",
-            ],
-          },
+          "$product.price",
         ],
       },
     },

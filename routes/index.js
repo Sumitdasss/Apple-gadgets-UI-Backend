@@ -7,6 +7,7 @@ import { checkFacebookToken } from '../Service/messengerController.js';
 import { createMainCategory, createSubCategory,createChildCategory,createSubChildCategory,getFullCategoryTree } from '../Controller/Catgorihandelar.js';
 import { createOrder } from '../Controller/CREATODER.js';
 import { OderActivity } from '../Controller/ShowOderactivity.js';
+import { getDashboardSummary } from '../Controller/Deshbord.js';
 const router = express.Router();
 router.post('/addproduct',upload.fields([
   {
@@ -37,6 +38,7 @@ router.post("/child", createChildCategory);
 router.post("/sub-child", createSubChildCategory);
 router.get("/tree", getFullCategoryTree);
 router.get("/order-activity", OderActivity);
+router.get("/summary", getDashboardSummary);
 
 
 

@@ -22,6 +22,7 @@ app.use(
     origin: [
       "http://localhost:3000",
       "https://apple-gadgets-ui.vercel.app",
+      "http://localhost:5173",
     ],
     credentials: true,
   })

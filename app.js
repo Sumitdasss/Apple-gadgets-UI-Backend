@@ -35,6 +35,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use("/products", router);
 app.use("/facebook" ,router)
 app.use("/category" ,router)
+app.use("/api/dashboard" ,router)
 
 
 export default app;

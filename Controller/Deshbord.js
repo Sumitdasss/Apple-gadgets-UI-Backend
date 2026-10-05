@@ -2,9 +2,6 @@ import MainOrder from "../Model/MainOrder.js";
 import Product from "../Model/Product.js";
 import Customer from "../Model/Customer.js";
 
-// =========================================================
-// HELPERS
-// =========================================================
 
 const calcGrowth = (current, previous) => {
   if (previous === 0) {
@@ -94,6 +91,10 @@ export const getDashboardSummary = async (req, res) => {
       },
     }).lean();
 
+
+
+
+    
     // =======================================================
     // TOTAL ORDERS
     // =======================================================
@@ -326,33 +327,106 @@ export const getDashboardSummary = async (req, res) => {
       })
       .limit(4)
       .lean();
+const topProducts = await MainOrder.aggregate([
+  // Selected date-এর order
+  {
+    $match: {
+      createdAt: {
+        $gte: currentStart,
+        $lte: currentEnd,
+      },
+    },
+  },
 
-    const topProducts = products.map((product) => ({
-      id: product._id,
+  // Order-এর items আলাদা করা
+  {
+    $unwind: "$items",
+  },
 
-      name:
-        product.name ||
-        product.title ||
-        "Unnamed Product",
+  // Product অনুযায়ী quantity যোগ করা
+  {
+    $group: {
+      _id: "$items.product",
+      sold: {
+        $sum: {
+          $ifNull: ["$items.quantity", 0],
+        },
+      },
+    },
+  },
 
-      image:
-        product.images?.[0]?.url ||
-        product.images?.[0] ||
-        product.image ||
-        "/images.png",
+  // বেশি sold আগে
+  {
+    $sort: {
+      sold: -1,
+    },
+  },
 
-      sold:
-        product.sold ||
-        product.totalSold ||
-        0,
+  // Top 4
+  {
+    $limit: 4,
+  },
 
-      price:
-        product.discountPrice ||
-        product.salePrice ||
-        product.price ||
-        0,
-    }));
+  // Product collection থেকে details আনা
+  {
+    $lookup: {
+      from: "products",
+      localField: "_id",
+      foreignField: "_id",
+      as: "product",
+    },
+  },
 
+  {
+    $unwind: "$product",
+  },
+
+  // Dashboard-এর জন্য data তৈরি
+  {
+    $project: {
+      _id: 0,
+
+      id: "$product._id",
+
+      name: {
+        $ifNull: [
+          "$product.name",
+          "$product.title",
+        ],
+      },
+
+      image: {
+        $ifNull: [
+          {
+            $arrayElemAt: [
+              "$product.images",
+              0,
+            ],
+          },
+          "/images.png",
+        ],
+      },
+
+      sold: 1,
+
+      price: {
+        $ifNull: [
+          "$product.discountPrice",
+          {
+            $ifNull: [
+              "$product.salePrice",
+              "$product.price",
+            ],
+          },
+        ],
+      },
+    },
+  },
+]);
+
+
+
+    
     // =======================================================
     // STORE
     // =======================================================
@@ -404,3 +478,4 @@ export const getDashboardSummary = async (req, res) => {
     });
   }
 };
+

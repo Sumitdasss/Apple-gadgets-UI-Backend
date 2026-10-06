@@ -4,10 +4,156 @@ import Customer from "../Model/Customer.js";
 import Product from "../Model/Product.js";
 
 /* =========================================================
+   HELPER
+========================================================= */
+
+// Object / String যেকোনো color value কে string করা
+const normalizeValue = (value) => {
+  if (value === null || value === undefined) {
+    return "";
+  }
+
+  if (
+    typeof value === "string" ||
+    typeof value === "number"
+  ) {
+    return String(value);
+  }
+
+  if (typeof value === "object") {
+    return String(
+      value.name ??
+        value.value ??
+        value.label ??
+        value.title ??
+        value.$oid ??
+        value._id ??
+        ""
+    );
+  }
+
+  return String(value);
+};
+
+
+// Product variant-এর color বের করা
+const getVariantColor = (variant) => {
+  return normalizeValue(variant?.color);
+};
+
+
+// Variant ID string করা
+const getVariantId = (variant) => {
+  if (!variant?._id) {
+    return null;
+  }
+
+  const id = normalizeValue(variant._id);
+
+  return mongoose.Types.ObjectId.isValid(id)
+    ? id
+    : null;
+};
+
+
+/* =========================================================
+   FIND MATCHING VARIANT
+========================================================= */
+
+const findMatchingVariant = (
+  product,
+  selectedVariant = {}
+) => {
+  if (
+    !Array.isArray(product?.variants) ||
+    product.variants.length === 0
+  ) {
+    return null;
+  }
+
+  const selectedColor =
+    normalizeValue(
+      selectedVariant.color
+    );
+
+  const selectedRam =
+    normalizeValue(
+      selectedVariant.ram
+    );
+
+  const selectedStorage =
+    normalizeValue(
+      selectedVariant.storage
+    );
+
+  const variant = product.variants.find(
+    (item) => {
+      const variantColor =
+        getVariantColor(item);
+
+      const variantRam =
+        normalizeValue(item?.ram);
+
+      const variantStorage =
+        normalizeValue(item?.storage);
+
+      const colorMatch =
+        !selectedColor ||
+        variantColor === selectedColor;
+
+      const ramMatch =
+        !selectedRam ||
+        variantRam === selectedRam;
+
+      const storageMatch =
+        !selectedStorage ||
+        variantStorage === selectedStorage;
+
+      return (
+        colorMatch &&
+        ramMatch &&
+        storageMatch
+      );
+    }
+  );
+
+  return variant || null;
+};
+
+
+/* =========================================================
+   GET COLOR IMAGE
+========================================================= */
+
+const getColorImage = (
+  product,
+  selectedColor
+) => {
+  if (
+    !Array.isArray(product?.colors) ||
+    !selectedColor
+  ) {
+    return "";
+  }
+
+  const color = product.colors.find(
+    (item) =>
+      normalizeValue(item?.name) ===
+      normalizeValue(selectedColor)
+  );
+
+  return color?.image || "";
+};
+
+
+/* =========================================================
    CREATE ORDER
 ========================================================= */
 
-export const createOrder = async (req, res) => {
+export const createOrder = async (
+  req,
+  res
+) => {
   try {
     const {
       customerName,
@@ -17,16 +163,15 @@ export const createOrder = async (req, res) => {
       deliveryAddress,
       note,
       products,
-      subTotal,
       deliveryCharge,
       discountAmount,
-      totalAmount,
       couponCode,
       paymentMethod,
       deliveryMethod,
       termsAgreed,
       orderSource,
     } = req.body;
+
 
     /* =====================================================
        BASIC VALIDATION
@@ -56,11 +201,15 @@ export const createOrder = async (req, res) => {
     if (!deliveryAddress?.trim()) {
       return res.status(400).json({
         success: false,
-        message: "Delivery address is required",
+        message:
+          "Delivery address is required",
       });
     }
 
-    if (!Array.isArray(products) || products.length === 0) {
+    if (
+      !Array.isArray(products) ||
+      products.length === 0
+    ) {
       return res.status(400).json({
         success: false,
         message: "Cart is empty",
@@ -70,32 +219,46 @@ export const createOrder = async (req, res) => {
     if (termsAgreed !== true) {
       return res.status(400).json({
         success: false,
-        message: "Please agree to Terms and Conditions",
+        message:
+          "Please agree to Terms and Conditions",
       });
     }
+
 
     /* =====================================================
        FIND / CREATE CUSTOMER
     ===================================================== */
 
-    const cleanPhone = phone.trim();
+    const cleanPhone =
+      phone.trim();
 
-    let customer = await Customer.findOne({
-      phone: cleanPhone,
-    });
+    let customer =
+      await Customer.findOne({
+        phone: cleanPhone,
+      });
 
     if (!customer) {
-      customer = await Customer.create({
-        name: customerName.trim(),
-        email: email?.trim() || "",
-        phone: cleanPhone,
-        address: deliveryAddress.trim(),
-      });
+      customer =
+        await Customer.create({
+          name:
+            customerName.trim(),
+
+          email:
+            email?.trim() || "",
+
+          phone:
+            cleanPhone,
+
+          address:
+            deliveryAddress.trim(),
+        });
     } else {
-      customer.name = customerName.trim();
+      customer.name =
+        customerName.trim();
 
       if (email?.trim()) {
-        customer.email = email.trim();
+        customer.email =
+          email.trim();
       }
 
       customer.address =
@@ -104,13 +267,27 @@ export const createOrder = async (req, res) => {
       await customer.save();
     }
 
+
     /* =====================================================
        PREPARE PRODUCTS
     ===================================================== */
 
     const orderProducts = [];
 
+    /*
+      এই array-তে variant stock update
+      করার জন্য information রাখা হবে
+    */
+
+    const stockUpdates = [];
+
+
     for (const item of products) {
+
+      /* ===================================================
+         PRODUCT ID
+      =================================================== */
+
       const productId =
         item.productId ||
         item.product ||
@@ -120,80 +297,385 @@ export const createOrder = async (req, res) => {
       if (!productId) {
         return res.status(400).json({
           success: false,
-          message: "Product ID is missing",
+          message:
+            "Product ID is missing",
         });
       }
 
-      if (!mongoose.Types.ObjectId.isValid(productId)) {
+      if (
+        !mongoose.Types.ObjectId.isValid(
+          productId
+        )
+      ) {
         return res.status(400).json({
           success: false,
-          message: `Invalid product ID: ${productId}`,
+          message:
+            `Invalid product ID: ${productId}`,
         });
       }
 
+
+      /* ===================================================
+         FIND PRODUCT
+      =================================================== */
+
       const product =
-        await Product.findById(productId);
+        await Product.findById(
+          productId
+        );
 
       if (!product) {
         return res.status(404).json({
           success: false,
           message:
             `Product not found: ${
-              item.name || "Unknown product"
+              item.name ||
+              "Unknown product"
             }`,
         });
       }
+
+
+      /* ===================================================
+         QUANTITY
+      =================================================== */
 
       const quantity = Math.max(
         1,
         Number(item.quantity || 1)
       );
 
+
+      /* ===================================================
+         SELECTED VARIANT
+      =================================================== */
+
+      const selectedVariant =
+        item.variant || {
+          color:
+            item.color || "",
+
+          ram:
+            item.ram || "",
+
+          storage:
+            item.storage || "",
+
+          variantId:
+            item.variantId || null,
+
+          sku:
+            item.sku || "",
+        };
+
+
+      /* ===================================================
+         FIND DATABASE VARIANT
+      =================================================== */
+
+      let matchedVariant =
+        null;
+
+      if (
+        Array.isArray(
+          product.variants
+        ) &&
+        product.variants.length > 0
+      ) {
+
+        /*
+          যদি frontend থেকে variantId আসে,
+          প্রথমে variantId দিয়ে খুঁজবে
+        */
+
+        const selectedVariantId =
+          normalizeValue(
+            selectedVariant.variantId
+          );
+
+        if (
+          selectedVariantId &&
+          mongoose.Types.ObjectId.isValid(
+            selectedVariantId
+          )
+        ) {
+          matchedVariant =
+            product.variants.find(
+              (variant) =>
+                String(
+                  variant._id
+                ) ===
+                selectedVariantId
+            );
+        }
+
+
+        /*
+          variantId না পাওয়া গেলে
+          color + ram + storage দিয়ে খুঁজবে
+        */
+
+        if (!matchedVariant) {
+          matchedVariant =
+            findMatchingVariant(
+              product,
+              selectedVariant
+            );
+        }
+
+
+        /* =================================================
+           VARIANT REQUIRED
+        ================================================= */
+
+        if (!matchedVariant) {
+          return res.status(400).json({
+            success: false,
+            message:
+              `${product.name}: selected variant is not available`,
+          });
+        }
+      }
+
+
+      /* ===================================================
+         VARIANT VALUES
+      ================================================= */
+
+      const color =
+        matchedVariant
+          ? getVariantColor(
+              matchedVariant
+            )
+          : normalizeValue(
+              selectedVariant.color ||
+                item.color
+            );
+
+      const ram =
+        matchedVariant
+          ? normalizeValue(
+              matchedVariant.ram
+            )
+          : normalizeValue(
+              selectedVariant.ram ||
+                item.ram
+            );
+
+      const storage =
+        matchedVariant
+          ? normalizeValue(
+              matchedVariant.storage
+            )
+          : normalizeValue(
+              selectedVariant.storage ||
+                item.storage
+            );
+
+
       /* ===================================================
          STOCK CHECK
       =================================================== */
 
-      const currentStock =
-        Number(product.stock || 0);
+      let currentStock = 0;
 
-      if (currentStock < quantity) {
+      if (matchedVariant) {
+
+        currentStock =
+          Number(
+            matchedVariant.stock || 0
+          );
+
+      } else {
+
+        currentStock =
+          Number(
+            product.stock || 0
+          );
+      }
+
+
+      if (
+        currentStock < quantity
+      ) {
         return res.status(400).json({
           success: false,
           message:
-            `${product.name} has only ${currentStock} item(s) in stock`,
+            `${product.name}${
+              color
+                ? ` (${color}`
+                : ""
+            }${
+              storage
+                ? ` / ${storage}`
+                : ""
+            }${
+              color
+                ? ")"
+                : ""
+            } has only ${currentStock} item(s) in stock`,
         });
       }
+
 
       /* ===================================================
          DATABASE PRICE
       =================================================== */
 
-      const price = Number(
-        product.discountPrice ||
-          product.price ||
-          0
-      );
+      let price = 0;
+
+      if (matchedVariant) {
+
+        /*
+          Variant-এর নিজের price
+        ব্যবহার হবে
+        */
+
+        price = Number(
+          matchedVariant.price || 0
+        );
+
+      } else {
+
+        /*
+          Variant না থাকলে
+          Product-এর price
+        */
+
+        price = Number(
+          product.discountPrice ||
+            product.price ||
+            0
+        );
+      }
+
+
+      if (price <= 0) {
+        return res.status(400).json({
+          success: false,
+          message:
+            `${product.name} has an invalid price`,
+        });
+      }
+
 
       /* ===================================================
-         ORDER PRODUCT
+         IMAGE
+      =================================================== */
+
+      let image = "";
+
+      if (
+        matchedVariant?.image
+      ) {
+        image =
+          matchedVariant.image;
+      }
+
+      if (!image && color) {
+        image =
+          getColorImage(
+            product,
+            color
+          );
+      }
+
+      if (
+        !image &&
+        Array.isArray(
+          product.images
+        )
+      ) {
+        image =
+          product.images[0] || "";
+      }
+
+
+      /* ===================================================
+         VARIANT ID
+      =================================================== */
+
+      const variantId =
+        matchedVariant
+          ? getVariantId(
+              matchedVariant
+            )
+          : null;
+
+
+      /* ===================================================
+         SKU
+      =================================================== */
+
+      const sku =
+        matchedVariant
+          ? normalizeValue(
+              matchedVariant.sku
+            )
+          : normalizeValue(
+              selectedVariant.sku
+            );
+
+
+      /* ===================================================
+         PRODUCT SUBTOTAL
+      =================================================== */
+
+      const itemSubtotal =
+        price * quantity;
+
+
+      /* ===================================================
+         PUSH ORDER PRODUCT
       =================================================== */
 
       orderProducts.push({
-        product: product._id,
+        product:
+          product._id,
 
-        name: product.name,
+        name:
+          product.name,
 
         price,
 
         quantity,
 
-        color:
-          item.color || "",
+        color,
+
+        ram,
+
+        storage,
+
+        variantId,
+
+        sku,
 
         size:
           item.size || "",
+
+        image,
+
+        subtotal:
+          itemSubtotal,
+      });
+
+
+      /* ===================================================
+         SAVE STOCK UPDATE INFO
+      =================================================== */
+
+      stockUpdates.push({
+        productId:
+          product._id,
+
+        variantId:
+          matchedVariant?._id ||
+          null,
+
+        quantity,
       });
     }
+
 
     /* =====================================================
        CALCULATE SUBTOTAL
@@ -211,26 +693,35 @@ export const createOrder = async (req, res) => {
         0
       );
 
+
     /* =====================================================
        DELIVERY CHARGE
     ===================================================== */
 
-    const safeDeliveryCharge = Math.max(
-      0,
-      Number(deliveryCharge || 0)
-    );
+    const safeDeliveryCharge =
+      Math.max(
+        0,
+        Number(
+          deliveryCharge || 0
+        )
+      );
+
 
     /* =====================================================
        DISCOUNT
     ===================================================== */
 
-    const safeDiscountAmount = Math.min(
-      Math.max(
-        Number(discountAmount || 0),
-        0
-      ),
-      calculatedSubTotal
-    );
+    const safeDiscountAmount =
+      Math.min(
+        Math.max(
+          Number(
+            discountAmount || 0
+          ),
+          0
+        ),
+        calculatedSubTotal
+      );
+
 
     /* =====================================================
        TOTAL
@@ -244,12 +735,14 @@ export const createOrder = async (req, res) => {
           safeDiscountAmount
       );
 
+
     /* =====================================================
        ORDER ID
     ===================================================== */
 
     const orderId =
       `ORD-${Date.now()}`;
+
 
     /* =====================================================
        CREATE ORDER
@@ -321,22 +814,72 @@ export const createOrder = async (req, res) => {
           "website",
       });
 
+
     /* =====================================================
-       REDUCE PRODUCT STOCK
+       REDUCE STOCK
     ===================================================== */
 
-    for (const item of orderProducts) {
-      await Product.findByIdAndUpdate(
-        item.product,
-        {
-          $inc: {
-            stock: -Number(
-              item.quantity
-            ),
+    for (
+      const stockItem
+      of stockUpdates
+    ) {
+
+      /*
+        Variant product হলে
+        variant-এর stock কমাবে
+      */
+
+      if (
+        stockItem.variantId
+      ) {
+
+        await Product.updateOne(
+          {
+            _id:
+              stockItem.productId,
+
+            "variants._id":
+              stockItem.variantId,
+
+            "variants.stock":
+              {
+                $gte:
+                  stockItem.quantity,
+              },
           },
-        }
-      );
+          {
+            $inc: {
+              "variants.$.stock":
+                -stockItem.quantity,
+
+              /*
+                Product-এর total stock-ও
+                কমানো হচ্ছে
+              */
+              stock:
+                -stockItem.quantity,
+            },
+          }
+        );
+
+      } else {
+
+        /*
+          Normal product
+        */
+
+        await Product.findByIdAndUpdate(
+          stockItem.productId,
+          {
+            $inc: {
+              stock:
+                -stockItem.quantity,
+            },
+          }
+        );
+      }
     }
+
 
     /* =====================================================
        SUCCESS
@@ -357,6 +900,7 @@ export const createOrder = async (req, res) => {
     });
 
   } catch (error) {
+
     console.error(
       "CREATE ORDER ERROR:",
       error
@@ -364,6 +908,7 @@ export const createOrder = async (req, res) => {
 
     return res.status(500).json({
       success: false,
+
       message:
         "Failed to create order",
 
@@ -386,6 +931,7 @@ export const getAllOrders = async (
   res
 ) => {
   try {
+
     const orders =
       await MainOrder.find()
         .populate(
@@ -394,7 +940,7 @@ export const getAllOrders = async (
         )
         .populate(
           "products.product",
-          "name price discountPrice stock"
+          "name price discountPrice stock images colors variants"
         )
         .sort({
           createdAt: -1,
@@ -402,11 +948,16 @@ export const getAllOrders = async (
 
     return res.status(200).json({
       success: true,
-      count: orders.length,
-      data: orders,
+
+      count:
+        orders.length,
+
+      data:
+        orders,
     });
 
   } catch (error) {
+
     console.error(
       "GET ALL ORDERS ERROR:",
       error
@@ -414,6 +965,7 @@ export const getAllOrders = async (
 
     return res.status(500).json({
       success: false,
+
       message:
         "Failed to get orders",
     });
@@ -430,14 +982,19 @@ export const getOrderById = async (
   res
 ) => {
   try {
-    const { id } = req.params;
+
+    const { id } =
+      req.params;
 
     if (
-      !mongoose.Types.ObjectId.isValid(id)
+      !mongoose.Types.ObjectId.isValid(
+        id
+      )
     ) {
       return res.status(400).json({
         success: false,
-        message: "Invalid order ID",
+        message:
+          "Invalid order ID",
       });
     }
 
@@ -449,13 +1006,14 @@ export const getOrderById = async (
         )
         .populate(
           "products.product",
-          "name price discountPrice stock images"
+          "name price discountPrice stock images colors variants"
         );
 
     if (!order) {
       return res.status(404).json({
         success: false,
-        message: "Order not found",
+        message:
+          "Order not found",
       });
     }
 
@@ -465,6 +1023,7 @@ export const getOrderById = async (
     });
 
   } catch (error) {
+
     console.error(
       "GET ORDER ERROR:",
       error
@@ -472,6 +1031,7 @@ export const getOrderById = async (
 
     return res.status(500).json({
       success: false,
+
       message:
         "Failed to get order",
     });
@@ -483,205 +1043,229 @@ export const getOrderById = async (
    GET ORDER BY ORDER ID
 ========================================================= */
 
-export const getOrderByOrderId = async (
-  req,
-  res
-) => {
-  try {
-    const { orderId } =
-      req.params;
+export const getOrderByOrderId =
+  async (
+    req,
+    res
+  ) => {
+    try {
 
-    const order =
-      await MainOrder.findOne({
-        orderId,
-      })
-        .populate(
-          "customer",
-          "name email phone address"
-        )
-        .populate(
-          "products.product",
-          "name price discountPrice images"
-        );
+      const { orderId } =
+        req.params;
 
-    if (!order) {
-      return res.status(404).json({
+      const order =
+        await MainOrder.findOne({
+          orderId,
+        })
+          .populate(
+            "customer",
+            "name email phone address"
+          )
+          .populate(
+            "products.product",
+            "name price discountPrice stock images colors variants"
+          );
+
+      if (!order) {
+        return res.status(404).json({
+          success: false,
+          message:
+            "Order not found",
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        data: order,
+      });
+
+    } catch (error) {
+
+      console.error(
+        "GET ORDER BY ORDER ID ERROR:",
+        error
+      );
+
+      return res.status(500).json({
         success: false,
-        message: "Order not found",
+
+        message:
+          "Failed to get order",
       });
     }
-
-    return res.status(200).json({
-      success: true,
-      data: order,
-    });
-
-  } catch (error) {
-    console.error(
-      "GET ORDER BY ORDER ID ERROR:",
-      error
-    );
-
-    return res.status(500).json({
-      success: false,
-      message:
-        "Failed to get order",
-    });
-  }
-};
+  };
 
 
 /* =========================================================
    UPDATE ORDER STATUS
 ========================================================= */
 
-export const updateOrderStatus = async (
-  req,
-  res
-) => {
-  try {
-    const { id } =
-      req.params;
+export const updateOrderStatus =
+  async (
+    req,
+    res
+  ) => {
+    try {
 
-    const {
-      status,
-    } = req.body;
+      const { id } =
+        req.params;
 
-    const allowedStatuses = [
-      "pending",
-      "confirmed",
-      "processing",
-      "ready_for_shipment",
-      "handed_over_to_courier",
-      "shipped",
-      "delivered",
-      "returned",
-      "cancelled",
-    ];
+      const { status } =
+        req.body;
 
-    if (
-      !allowedStatuses.includes(
-        status
-      )
-    ) {
-      return res.status(400).json({
-        success: false,
+      const allowedStatuses = [
+        "pending",
+        "confirmed",
+        "processing",
+        "ready_for_shipment",
+        "handed_over_to_courier",
+        "shipped",
+        "delivered",
+        "returned",
+        "cancelled",
+      ];
+
+      if (
+        !allowedStatuses.includes(
+          status
+        )
+      ) {
+        return res.status(400).json({
+          success: false,
+
+          message:
+            "Invalid order status",
+        });
+      }
+
+      const order =
+        await MainOrder.findByIdAndUpdate(
+          id,
+          {
+            status,
+          },
+          {
+            new: true,
+            runValidators: true,
+          }
+        );
+
+      if (!order) {
+        return res.status(404).json({
+          success: false,
+
+          message:
+            "Order not found",
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+
         message:
-          "Invalid order status",
-      });
-    }
+          "Order status updated successfully",
 
-    const order =
-      await MainOrder.findByIdAndUpdate(
-        id,
-        {
-          status,
-        },
-        {
-          new: true,
-          runValidators: true,
-        }
+        data:
+          order,
+      });
+
+    } catch (error) {
+
+      console.error(
+        "UPDATE ORDER STATUS ERROR:",
+        error
       );
 
-    if (!order) {
-      return res.status(404).json({
+      return res.status(500).json({
         success: false,
-        message: "Order not found",
+
+        message:
+          "Failed to update order status",
       });
     }
-
-    return res.status(200).json({
-      success: true,
-      message:
-        "Order status updated successfully",
-      data: order,
-    });
-
-  } catch (error) {
-    console.error(
-      "UPDATE ORDER STATUS ERROR:",
-      error
-    );
-
-    return res.status(500).json({
-      success: false,
-      message:
-        "Failed to update order status",
-    });
-  }
-};
+  };
 
 
 /* =========================================================
    UPDATE PAYMENT STATUS
 ========================================================= */
 
-export const updatePaymentStatus = async (
-  req,
-  res
-) => {
-  try {
-    const { id } =
-      req.params;
+export const updatePaymentStatus =
+  async (
+    req,
+    res
+  ) => {
+    try {
 
-    const {
-      paymentStatus,
-    } = req.body;
+      const { id } =
+        req.params;
 
-    const allowedStatuses = [
-      "unpaid",
-      "partially_paid",
-      "paid",
-    ];
+      const {
+        paymentStatus,
+      } = req.body;
 
-    if (
-      !allowedStatuses.includes(
-        paymentStatus
-      )
-    ) {
-      return res.status(400).json({
-        success: false,
+      const allowedStatuses = [
+        "unpaid",
+        "partially_paid",
+        "paid",
+      ];
+
+      if (
+        !allowedStatuses.includes(
+          paymentStatus
+        )
+      ) {
+        return res.status(400).json({
+          success: false,
+
+          message:
+            "Invalid payment status",
+        });
+      }
+
+      const order =
+        await MainOrder.findByIdAndUpdate(
+          id,
+          {
+            paymentStatus,
+          },
+          {
+            new: true,
+            runValidators: true,
+          }
+        );
+
+      if (!order) {
+        return res.status(404).json({
+          success: false,
+
+          message:
+            "Order not found",
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+
         message:
-          "Invalid payment status",
-      });
-    }
+          "Payment status updated successfully",
 
-    const order =
-      await MainOrder.findByIdAndUpdate(
-        id,
-        {
-          paymentStatus,
-        },
-        {
-          new: true,
-          runValidators: true,
-        }
+        data:
+          order,
+      });
+
+    } catch (error) {
+
+      console.error(
+        "UPDATE PAYMENT STATUS ERROR:",
+        error
       );
 
-    if (!order) {
-      return res.status(404).json({
+      return res.status(500).json({
         success: false,
-        message: "Order not found",
+
+        message:
+          "Failed to update payment status",
       });
     }
-
-    return res.status(200).json({
-      success: true,
-      message:
-        "Payment status updated successfully",
-      data: order,
-    });
-
-  } catch (error) {
-    console.error(
-      "UPDATE PAYMENT STATUS ERROR:",
-      error
-    );
-
-    return res.status(500).json({
-      success: false,
-      message:
-        "Failed to update payment status",
-    });
-  }
-};
+  };

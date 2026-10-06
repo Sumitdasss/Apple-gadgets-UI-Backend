@@ -2,10 +2,14 @@ import mongoose from "mongoose";
 
 const orderSchema = new mongoose.Schema(
   {
+    // =========================
+    // ORDER BASIC INFORMATION
+    // =========================
     orderId: {
       type: String,
       unique: true,
       required: true,
+      trim: true,
     },
 
     customer: {
@@ -14,7 +18,9 @@ const orderSchema = new mongoose.Schema(
       required: true,
     },
 
-    // Customer Contact Details (Image Forms)
+    // =========================
+    // CUSTOMER INFORMATION
+    // =========================
     customerName: {
       type: String,
       required: true,
@@ -37,117 +43,218 @@ const orderSchema = new mongoose.Schema(
     selectArea: {
       type: String,
       required: true,
+      trim: true,
     },
 
     deliveryAddress: {
       type: String,
       required: true,
+      trim: true,
     },
 
     note: {
       type: String,
       default: "",
+      trim: true,
     },
 
-    // Ordered Products List
+    // =========================
+    // ORDERED PRODUCTS
+    // =========================
     products: [
       {
+        // Product MongoDB ID
         product: {
           type: mongoose.Schema.Types.ObjectId,
           ref: "Product",
           required: true,
         },
+
+        // Product name snapshot
         name: {
           type: String,
           required: true,
+          trim: true,
         },
+
+        // Product/Variant price at the time of order
         price: {
           type: Number,
           required: true,
+          min: 0,
         },
+
         quantity: {
           type: Number,
+          required: true,
           default: 1,
+          min: 1,
         },
+
+        // =========================
+        // PRODUCT VARIANT
+        // =========================
+
+        // Selected color
         color: {
           type: String,
           default: "",
+          trim: true,
         },
+
+        // Selected RAM
+        ram: {
+          type: String,
+          default: "",
+          trim: true,
+        },
+
+        // Selected Storage
+        storage: {
+          type: String,
+          default: "",
+          trim: true,
+        },
+
+        // Variant MongoDB ID
+        variantId: {
+          type: mongoose.Schema.Types.ObjectId,
+          default: null,
+        },
+
+        // Variant SKU
+        sku: {
+          type: String,
+          default: "",
+          trim: true,
+        },
+
+        // Old size field
+        // Kept for compatibility with old orders/products
         size: {
           type: String,
           default: "",
+          trim: true,
+        },
+
+        // Optional image snapshot
+        image: {
+          type: String,
+          default: "",
+        },
+
+        // Optional subtotal for this product
+        subtotal: {
+          type: Number,
+          default: 0,
+          min: 0,
         },
       },
     ],
 
-    // Order Calculation Breakdown
+    // =========================
+    // ORDER CALCULATION
+    // =========================
     subTotal: {
       type: Number,
       required: true,
       default: 0,
+      min: 0,
     },
 
     deliveryCharge: {
       type: Number,
       default: 0,
+      min: 0,
     },
 
     discountAmount: {
       type: Number,
       default: 0,
+      min: 0,
     },
 
     couponCode: {
       type: String,
       default: "",
+      trim: true,
+      uppercase: true,
     },
 
     totalAmount: {
       type: Number,
       required: true,
       default: 0,
+      min: 0,
     },
 
-    // Payment Info
+    // =========================
+    // PAYMENT INFORMATION
+    // =========================
     paymentMethod: {
       type: String,
-      enum: ["cash_on_delivery", "online_payment", "partial_payment"],
+      enum: [
+        "cash_on_delivery",
+        "online_payment",
+        "partial_payment",
+      ],
       default: "cash_on_delivery",
     },
 
     paymentStatus: {
       type: String,
-      enum: ["unpaid", "partially_paid", "paid"],
+      enum: [
+        "unpaid",
+        "partially_paid",
+        "paid",
+      ],
       default: "unpaid",
     },
 
-    // Delivery Method & Courier Integration Details
+    // =========================
+    // DELIVERY METHOD
+    // =========================
     deliveryMethod: {
       type: String,
-      enum: ["courier_service", "shop_pickup"],
+      enum: [
+        "courier_service",
+        "shop_pickup",
+      ],
       default: "courier_service",
     },
 
+    // =========================
+    // COURIER INFORMATION
+    // =========================
     courierDetails: {
       provider: {
         type: String,
-        default: "", // e.g., "Steadfast", "Pathao", "Paperfly"
+        default: "",
+        trim: true,
       },
+
       trackingCode: {
         type: String,
         default: "",
+        trim: true,
       },
+
       consignmentId: {
         type: String,
         default: "",
+        trim: true,
       },
+
       courierStatus: {
         type: String,
         default: "",
+        trim: true,
       },
     },
 
-    // Updated Complete Order Status Lifecycle
+    // =========================
+    // ORDER STATUS
+    // =========================
     status: {
       type: String,
       enum: [
@@ -164,15 +271,22 @@ const orderSchema = new mongoose.Schema(
       default: "pending",
     },
 
+    // =========================
+    // TERMS
+    // =========================
     termsAgreed: {
       type: Boolean,
       required: true,
       default: true,
     },
 
+    // =========================
+    // ORDER SOURCE
+    // =========================
     source: {
       type: String,
       default: "website",
+      trim: true,
     },
   },
   {
@@ -181,6 +295,7 @@ const orderSchema = new mongoose.Schema(
 );
 
 const MainOrder =
-  mongoose.models.MainOrder || mongoose.model("MainOrder", orderSchema);
+  mongoose.models.MainOrder ||
+  mongoose.model("MainOrder", orderSchema);
 
 export default MainOrder;

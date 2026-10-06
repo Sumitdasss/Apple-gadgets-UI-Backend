@@ -1,3 +1,4 @@
+
 import mongoose from "mongoose";
 import MainOrder from "../Model/MainOrder.js";
 import Customer from "../Model/Customer.js";
@@ -7,7 +8,6 @@ import Product from "../Model/Product.js";
    HELPER
 ========================================================= */
 
-// Object / String যেকোনো color value কে string করা
 const normalizeValue = (value) => {
   if (value === null || value === undefined) {
     return "";
@@ -17,7 +17,7 @@ const normalizeValue = (value) => {
     typeof value === "string" ||
     typeof value === "number"
   ) {
-    return String(value);
+    return String(value).trim();
   }
 
   if (typeof value === "object") {
@@ -29,20 +29,26 @@ const normalizeValue = (value) => {
         value.$oid ??
         value._id ??
         ""
-    );
+    ).trim();
   }
 
-  return String(value);
+  return String(value).trim();
 };
 
 
-// Product variant-এর color বের করা
+/* =========================================================
+   GET VARIANT COLOR
+========================================================= */
+
 const getVariantColor = (variant) => {
   return normalizeValue(variant?.color);
 };
 
 
-// Variant ID string করা
+/* =========================================================
+   GET VARIANT ID
+========================================================= */
+
 const getVariantId = (variant) => {
   if (!variant?._id) {
     return null;
@@ -71,51 +77,46 @@ const findMatchingVariant = (
     return null;
   }
 
-  const selectedColor =
-    normalizeValue(
-      selectedVariant.color
-    );
-
-  const selectedRam =
-    normalizeValue(
-      selectedVariant.ram
-    );
-
-  const selectedStorage =
-    normalizeValue(
-      selectedVariant.storage
-    );
-
-  const variant = product.variants.find(
-    (item) => {
-      const variantColor =
-        getVariantColor(item);
-
-      const variantRam =
-        normalizeValue(item?.ram);
-
-      const variantStorage =
-        normalizeValue(item?.storage);
-
-      const colorMatch =
-        !selectedColor ||
-        variantColor === selectedColor;
-
-      const ramMatch =
-        !selectedRam ||
-        variantRam === selectedRam;
-
-      const storageMatch =
-        !selectedStorage ||
-        variantStorage === selectedStorage;
-
-      return (
-        colorMatch &&
-        ramMatch &&
-        storageMatch
-      );
-    }
+  const selectedColor = normalizeValue(
+    selectedVariant.color
   );
+
+  const selectedRam = normalizeValue(
+    selectedVariant.ram
+  );
+
+  const selectedStorage = normalizeValue(
+    selectedVariant.storage
+  );
+
+  const variant = product.variants.find((item) => {
+    const variantColor =
+      getVariantColor(item);
+
+    const variantRam =
+      normalizeValue(item?.ram);
+
+    const variantStorage =
+      normalizeValue(item?.storage);
+
+    const colorMatch =
+      !selectedColor ||
+      variantColor === selectedColor;
+
+    const ramMatch =
+      !selectedRam ||
+      variantRam === selectedRam;
+
+    const storageMatch =
+      !selectedStorage ||
+      variantStorage === selectedStorage;
+
+    return (
+      colorMatch &&
+      ramMatch &&
+      storageMatch
+    );
+  });
 
   return variant || null;
 };
@@ -201,8 +202,7 @@ export const createOrder = async (
     if (!deliveryAddress?.trim()) {
       return res.status(400).json({
         success: false,
-        message:
-          "Delivery address is required",
+        message: "Delivery address is required",
       });
     }
 
@@ -229,8 +229,7 @@ export const createOrder = async (
        FIND / CREATE CUSTOMER
     ===================================================== */
 
-    const cleanPhone =
-      phone.trim();
+    const cleanPhone = phone.trim();
 
     let customer =
       await Customer.findOne({
@@ -240,17 +239,10 @@ export const createOrder = async (
     if (!customer) {
       customer =
         await Customer.create({
-          name:
-            customerName.trim(),
-
-          email:
-            email?.trim() || "",
-
-          phone:
-            cleanPhone,
-
-          address:
-            deliveryAddress.trim(),
+          name: customerName.trim(),
+          email: email?.trim() || "",
+          phone: cleanPhone,
+          address: deliveryAddress.trim(),
         });
     } else {
       customer.name =
@@ -274,13 +266,12 @@ export const createOrder = async (
 
     const orderProducts = [];
 
-    /*
-      এই array-তে variant stock update
-      করার জন্য information রাখা হবে
-    */
-
     const stockUpdates = [];
 
+
+    /* =====================================================
+       LOOP PRODUCTS
+    ===================================================== */
 
     for (const item of products) {
 
@@ -297,8 +288,7 @@ export const createOrder = async (
       if (!productId) {
         return res.status(400).json({
           success: false,
-          message:
-            "Product ID is missing",
+          message: "Product ID is missing",
         });
       }
 
@@ -320,17 +310,14 @@ export const createOrder = async (
       =================================================== */
 
       const product =
-        await Product.findById(
-          productId
-        );
+        await Product.findById(productId);
 
       if (!product) {
         return res.status(404).json({
           success: false,
           message:
             `Product not found: ${
-              item.name ||
-              "Unknown product"
+              item.name || "Unknown product"
             }`,
         });
       }
@@ -352,20 +339,12 @@ export const createOrder = async (
 
       const selectedVariant =
         item.variant || {
-          color:
-            item.color || "",
-
-          ram:
-            item.ram || "",
-
-          storage:
-            item.storage || "",
-
+          color: item.color || "",
+          ram: item.ram || "",
+          storage: item.storage || "",
           variantId:
             item.variantId || null,
-
-          sku:
-            item.sku || "",
+          sku: item.sku || "",
         };
 
 
@@ -373,20 +352,17 @@ export const createOrder = async (
          FIND DATABASE VARIANT
       =================================================== */
 
-      let matchedVariant =
-        null;
+      let matchedVariant = null;
 
       if (
-        Array.isArray(
-          product.variants
-        ) &&
+        Array.isArray(product.variants) &&
         product.variants.length > 0
       ) {
 
-        /*
-          যদি frontend থেকে variantId আসে,
-          প্রথমে variantId দিয়ে খুঁজবে
-        */
+        /* ================================================
+           FIRST:
+           FIND USING EXACT VARIANT ID
+        ================================================ */
 
         const selectedVariantId =
           normalizeValue(
@@ -402,18 +378,16 @@ export const createOrder = async (
           matchedVariant =
             product.variants.find(
               (variant) =>
-                String(
-                  variant._id
-                ) ===
+                String(variant._id) ===
                 selectedVariantId
             );
         }
 
 
-        /*
-          variantId না পাওয়া গেলে
-          color + ram + storage দিয়ে খুঁজবে
-        */
+        /* ================================================
+           SECOND:
+           FIND USING COLOR + RAM + STORAGE
+        ================================================ */
 
         if (!matchedVariant) {
           matchedVariant =
@@ -424,9 +398,9 @@ export const createOrder = async (
         }
 
 
-        /* =================================================
+        /* ================================================
            VARIANT REQUIRED
-        ================================================= */
+        ================================================ */
 
         if (!matchedVariant) {
           return res.status(400).json({
@@ -440,7 +414,7 @@ export const createOrder = async (
 
       /* ===================================================
          VARIANT VALUES
-      ================================================= */
+      =================================================== */
 
       const color =
         matchedVariant
@@ -474,45 +448,36 @@ export const createOrder = async (
 
 
       /* ===================================================
-         STOCK CHECK
+         EXACT STOCK CHECK
       =================================================== */
 
-      let currentStock = 0;
-
-      if (matchedVariant) {
-
-        currentStock =
-          Number(
-            matchedVariant.stock || 0
-          );
-
-      } else {
-
-        currentStock =
-          Number(
-            product.stock || 0
-          );
-      }
+      const currentStock =
+        matchedVariant
+          ? Number(
+              matchedVariant.stock || 0
+            )
+          : Number(
+              product.stock || 0
+            );
 
 
-      if (
-        currentStock < quantity
-      ) {
+      /* ===================================================
+         CHECK STOCK
+      =================================================== */
+
+      if (currentStock < quantity) {
         return res.status(400).json({
           success: false,
+
           message:
             `${product.name}${
-              color
-                ? ` (${color}`
-                : ""
+              color ? ` (${color}` : ""
             }${
-              storage
-                ? ` / ${storage}`
-                : ""
+              ram ? ` / ${ram}` : ""
             }${
-              color
-                ? ")"
-                : ""
+              storage ? ` / ${storage}` : ""
+            }${
+              color ? ")" : ""
             } has only ${currentStock} item(s) in stock`,
         });
       }
@@ -525,30 +490,18 @@ export const createOrder = async (
       let price = 0;
 
       if (matchedVariant) {
-
-        /*
-          Variant-এর নিজের price
-        ব্যবহার হবে
-        */
-
-        price = Number(
-          matchedVariant.price || 0
-        );
-
+        price =
+          Number(
+            matchedVariant.price || 0
+          );
       } else {
-
-        /*
-          Variant না থাকলে
-          Product-এর price
-        */
-
-        price = Number(
-          product.discountPrice ||
-            product.price ||
-            0
-        );
+        price =
+          Number(
+            product.discountPrice ||
+              product.price ||
+              0
+          );
       }
-
 
       if (price <= 0) {
         return res.status(400).json({
@@ -565,9 +518,7 @@ export const createOrder = async (
 
       let image = "";
 
-      if (
-        matchedVariant?.image
-      ) {
+      if (matchedVariant?.image) {
         image =
           matchedVariant.image;
       }
@@ -582,9 +533,7 @@ export const createOrder = async (
 
       if (
         !image &&
-        Array.isArray(
-          product.images
-        )
+        Array.isArray(product.images)
       ) {
         image =
           product.images[0] || "";
@@ -592,7 +541,7 @@ export const createOrder = async (
 
 
       /* ===================================================
-         VARIANT ID
+         EXACT VARIANT ID
       =================================================== */
 
       const variantId =
@@ -630,11 +579,9 @@ export const createOrder = async (
       =================================================== */
 
       orderProducts.push({
-        product:
-          product._id,
+        product: product._id,
 
-        name:
-          product.name,
+        name: product.name,
 
         price,
 
@@ -661,16 +608,19 @@ export const createOrder = async (
 
 
       /* ===================================================
-         SAVE STOCK UPDATE INFO
+         SAVE EXACT STOCK UPDATE
       =================================================== */
 
       stockUpdates.push({
         productId:
-          product._id,
+          String(product._id),
 
         variantId:
-          matchedVariant?._id ||
-          null,
+          matchedVariant
+            ? String(
+                matchedVariant._id
+              )
+            : null,
 
         quantity,
       });
@@ -734,6 +684,316 @@ export const createOrder = async (
           safeDeliveryCharge -
           safeDiscountAmount
       );
+
+
+    /* =====================================================
+       DEBUG STOCK DATA
+    ===================================================== */
+
+    console.log(
+      "================================="
+    );
+
+    console.log(
+      "STOCK UPDATES:"
+    );
+
+    console.log(
+      JSON.stringify(
+        stockUpdates,
+        null,
+        2
+      )
+    );
+
+    console.log(
+      "================================="
+    );
+
+
+    /* =====================================================
+       REDUCE STOCK
+
+       Variant থাকলে:
+       - Exact variant stock কমবে
+       - Main product stock কমবে
+
+       Variant না থাকলে:
+       - Main product stock কমবে
+    ===================================================== */
+
+    for (
+      const stockItem
+      of stockUpdates
+    ) {
+
+      /* ===================================================
+         VARIANT PRODUCT
+      =================================================== */
+
+      if (stockItem.variantId) {
+
+        const productId =
+          new mongoose.Types.ObjectId(
+            String(
+              stockItem.productId
+            )
+          );
+
+        const variantId =
+          new mongoose.Types.ObjectId(
+            String(
+              stockItem.variantId
+            )
+          );
+
+        const quantity =
+          Number(
+            stockItem.quantity
+          );
+
+
+        console.log(
+          "================================="
+        );
+
+        console.log(
+          "VARIANT STOCK UPDATE"
+        );
+
+        console.log(
+          "PRODUCT ID:",
+          productId.toString()
+        );
+
+        console.log(
+          "VARIANT ID:",
+          variantId.toString()
+        );
+
+        console.log(
+          "QUANTITY:",
+          quantity
+        );
+
+
+        /* =================================================
+           EXACT VARIANT STOCK UPDATE
+
+           এখানে arrayFilters ব্যবহার করা হচ্ছে।
+        ================================================= */
+
+        const result =
+          await Product.updateOne(
+
+            /* ---------------------------------------------
+               FILTER
+            --------------------------------------------- */
+
+            {
+              _id: productId,
+
+              // Product main stock check
+              stock: {
+                $gte: quantity,
+              },
+
+              // Exact variant check
+              variants: {
+                $elemMatch: {
+                  _id: variantId,
+
+                  stock: {
+                    $gte: quantity,
+                  },
+                },
+              },
+            },
+
+
+            /* ---------------------------------------------
+               UPDATE
+            --------------------------------------------- */
+
+            {
+              $inc: {
+
+                // Exact selected variant stock
+                "variants.$[selectedVariant].stock":
+                  -quantity,
+
+                // Main product stock
+                stock:
+                  -quantity,
+              },
+            },
+
+
+            /* ---------------------------------------------
+               ARRAY FILTER
+            --------------------------------------------- */
+
+            {
+              arrayFilters: [
+                {
+                  "selectedVariant._id":
+                    variantId,
+
+                  "selectedVariant.stock": {
+                    $gte: quantity,
+                  },
+                },
+              ],
+            }
+          );
+
+
+        console.log(
+          "VARIANT STOCK UPDATE RESULT:",
+          {
+            matchedCount:
+              result.matchedCount,
+
+            modifiedCount:
+              result.modifiedCount,
+          }
+        );
+
+
+        /* =================================================
+           STOCK UPDATE FAILED
+        ================================================= */
+
+        if (
+          result.matchedCount === 0
+        ) {
+          return res.status(400).json({
+            success: false,
+
+            message:
+              `${productId}: selected variant stock is no longer available`,
+          });
+        }
+
+
+        if (
+          result.modifiedCount === 0
+        ) {
+          return res.status(400).json({
+            success: false,
+
+            message:
+              "Failed to reduce selected variant stock",
+          });
+        }
+
+
+        console.log(
+          "Variant stock successfully reduced:",
+          variantId.toString()
+        );
+      }
+
+
+      /* ===================================================
+         NORMAL PRODUCT
+      =================================================== */
+
+      else {
+
+        const productId =
+          new mongoose.Types.ObjectId(
+            String(
+              stockItem.productId
+            )
+          );
+
+        const quantity =
+          Number(
+            stockItem.quantity
+          );
+
+
+        console.log(
+          "================================="
+        );
+
+        console.log(
+          "NORMAL PRODUCT STOCK UPDATE"
+        );
+
+        console.log(
+          "PRODUCT ID:",
+          productId.toString()
+        );
+
+        console.log(
+          "QUANTITY:",
+          quantity
+        );
+
+
+        const result =
+          await Product.updateOne(
+            {
+              _id: productId,
+
+              stock: {
+                $gte: quantity,
+              },
+            },
+
+            {
+              $inc: {
+                stock:
+                  -quantity,
+              },
+            }
+          );
+
+
+        console.log(
+          "NORMAL STOCK UPDATE RESULT:",
+          {
+            matchedCount:
+              result.matchedCount,
+
+            modifiedCount:
+              result.modifiedCount,
+          }
+        );
+
+
+        if (
+          result.matchedCount === 0
+        ) {
+          return res.status(400).json({
+            success: false,
+
+            message:
+              "Product stock is no longer available",
+          });
+        }
+
+
+        if (
+          result.modifiedCount === 0
+        ) {
+          return res.status(400).json({
+            success: false,
+
+            message:
+              "Failed to reduce product stock",
+          });
+        }
+
+
+        console.log(
+          "Product stock successfully reduced:",
+          productId.toString()
+        );
+      }
+    }
 
 
     /* =====================================================
@@ -816,72 +1076,6 @@ export const createOrder = async (
 
 
     /* =====================================================
-       REDUCE STOCK
-    ===================================================== */
-
-    for (
-      const stockItem
-      of stockUpdates
-    ) {
-
-      /*
-        Variant product হলে
-        variant-এর stock কমাবে
-      */
-
-      if (
-        stockItem.variantId
-      ) {
-
-        await Product.updateOne(
-          {
-            _id:
-              stockItem.productId,
-
-            "variants._id":
-              stockItem.variantId,
-
-            "variants.stock":
-              {
-                $gte:
-                  stockItem.quantity,
-              },
-          },
-          {
-            $inc: {
-              "variants.$.stock":
-                -stockItem.quantity,
-
-              /*
-                Product-এর total stock-ও
-                কমানো হচ্ছে
-              */
-              stock:
-                -stockItem.quantity,
-            },
-          }
-        );
-
-      } else {
-
-        /*
-          Normal product
-        */
-
-        await Product.findByIdAndUpdate(
-          stockItem.productId,
-          {
-            $inc: {
-              stock:
-                -stockItem.quantity,
-            },
-          }
-        );
-      }
-    }
-
-
-    /* =====================================================
        SUCCESS
     ===================================================== */
 
@@ -946,6 +1140,7 @@ export const getAllOrders = async (
           createdAt: -1,
         });
 
+
     return res.status(200).json({
       success: true,
 
@@ -986,6 +1181,7 @@ export const getOrderById = async (
     const { id } =
       req.params;
 
+
     if (
       !mongoose.Types.ObjectId.isValid(
         id
@@ -998,6 +1194,7 @@ export const getOrderById = async (
       });
     }
 
+
     const order =
       await MainOrder.findById(id)
         .populate(
@@ -1009,6 +1206,7 @@ export const getOrderById = async (
           "name price discountPrice stock images colors variants"
         );
 
+
     if (!order) {
       return res.status(404).json({
         success: false,
@@ -1017,9 +1215,11 @@ export const getOrderById = async (
       });
     }
 
+
     return res.status(200).json({
       success: true,
-      data: order,
+      data:
+        order,
     });
 
   } catch (error) {
@@ -1048,10 +1248,12 @@ export const getOrderByOrderId =
     req,
     res
   ) => {
+
     try {
 
       const { orderId } =
         req.params;
+
 
       const order =
         await MainOrder.findOne({
@@ -1066,6 +1268,7 @@ export const getOrderByOrderId =
             "name price discountPrice stock images colors variants"
           );
 
+
       if (!order) {
         return res.status(404).json({
           success: false,
@@ -1074,9 +1277,11 @@ export const getOrderByOrderId =
         });
       }
 
+
       return res.status(200).json({
         success: true,
-        data: order,
+        data:
+          order,
       });
 
     } catch (error) {
@@ -1105,6 +1310,7 @@ export const updateOrderStatus =
     req,
     res
   ) => {
+
     try {
 
       const { id } =
@@ -1112,6 +1318,7 @@ export const updateOrderStatus =
 
       const { status } =
         req.body;
+
 
       const allowedStatuses = [
         "pending",
@@ -1124,6 +1331,7 @@ export const updateOrderStatus =
         "returned",
         "cancelled",
       ];
+
 
       if (
         !allowedStatuses.includes(
@@ -1138,6 +1346,7 @@ export const updateOrderStatus =
         });
       }
 
+
       const order =
         await MainOrder.findByIdAndUpdate(
           id,
@@ -1150,6 +1359,7 @@ export const updateOrderStatus =
           }
         );
 
+
       if (!order) {
         return res.status(404).json({
           success: false,
@@ -1158,6 +1368,7 @@ export const updateOrderStatus =
             "Order not found",
         });
       }
+
 
       return res.status(200).json({
         success: true,
@@ -1195,6 +1406,7 @@ export const updatePaymentStatus =
     req,
     res
   ) => {
+
     try {
 
       const { id } =
@@ -1204,11 +1416,13 @@ export const updatePaymentStatus =
         paymentStatus,
       } = req.body;
 
+
       const allowedStatuses = [
         "unpaid",
         "partially_paid",
         "paid",
       ];
+
 
       if (
         !allowedStatuses.includes(
@@ -1223,6 +1437,7 @@ export const updatePaymentStatus =
         });
       }
 
+
       const order =
         await MainOrder.findByIdAndUpdate(
           id,
@@ -1235,6 +1450,7 @@ export const updatePaymentStatus =
           }
         );
 
+
       if (!order) {
         return res.status(404).json({
           success: false,
@@ -1243,6 +1459,7 @@ export const updatePaymentStatus =
             "Order not found",
         });
       }
+
 
       return res.status(200).json({
         success: true,
@@ -1269,3 +1486,5 @@ export const updatePaymentStatus =
       });
     }
   };
+
+

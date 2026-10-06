@@ -1,7 +1,11 @@
+
 import MainOrder from "../Model/MainOrder.js";
 import Product from "../Model/Product.js";
 import Customer from "../Model/Customer.js";
 
+// =========================================================
+// GROWTH CALCULATION
+// =========================================================
 
 const calcGrowth = (current, previous) => {
   if (previous === 0) {
@@ -39,14 +43,14 @@ export const getDashboardSummary = async (req, res) => {
       });
     }
 
-    // Start of selected day
-    const currentStart = new Date(selectedDate);
+    // =======================================================
+    // CURRENT DAY
+    // =======================================================
 
+    const currentStart = new Date(selectedDate);
     currentStart.setHours(0, 0, 0, 0);
 
-    // End of selected day
     const currentEnd = new Date(selectedDate);
-
     currentEnd.setHours(23, 59, 59, 999);
 
     // =======================================================
@@ -91,10 +95,6 @@ export const getDashboardSummary = async (req, res) => {
       },
     }).lean();
 
-
-
-
-    
     // =======================================================
     // TOTAL ORDERS
     // =======================================================
@@ -117,9 +117,13 @@ export const getDashboardSummary = async (req, res) => {
         {
           $group: {
             _id: null,
+
             total: {
               $sum: {
-                $ifNull: ["$totalAmount", 0],
+                $ifNull: [
+                  "$totalAmount",
+                  0,
+                ],
               },
             },
           },
@@ -129,19 +133,31 @@ export const getDashboardSummary = async (req, res) => {
     const totalSalesValue =
       totalSalesAggregate[0]?.total || 0;
 
-    // Current day sales
+    // =======================================================
+    // CURRENT DAY SALES
+    // =======================================================
+
     const currentSales =
       currentOrders.reduce(
         (acc, order) =>
-          acc + Number(order.totalAmount || 0),
+          acc +
+          Number(
+            order.totalAmount || 0
+          ),
         0
       );
 
-    // Previous day sales
+    // =======================================================
+    // PREVIOUS DAY SALES
+    // =======================================================
+
     const previousSales =
       previousOrders.reduce(
         (acc, order) =>
-          acc + Number(order.totalAmount || 0),
+          acc +
+          Number(
+            order.totalAmount || 0
+          ),
         0
       );
 
@@ -247,25 +263,33 @@ export const getDashboardSummary = async (req, res) => {
       statusMap[status].count += 1;
 
       statusMap[status].total +=
-        Number(order.totalAmount || 0);
+        Number(
+          order.totalAmount || 0
+        );
     });
 
-    const status = Object.values(statusMap);
+    const status =
+      Object.values(statusMap);
 
     // =======================================================
     // ORDER AREAS
+    // =======================================================
+    //
+    // MainOrder document:
+    //
+    // selectArea:
+    // "Barisal > Barguna > Patharghata"
+    //
+    // তাই এখান থেকে সরাসরি area নেওয়া হচ্ছে।
     // =======================================================
 
     const areaMap = {};
 
     currentOrders.forEach((order) => {
       const location =
-        order?.deliveryAddress?.city ||
-        order?.shippingAddress?.city ||
-        order?.address?.city ||
-        order?.city ||
-        order?.location ||
-        "Unknown";
+        String(
+          order?.selectArea || ""
+        ).trim() || "Unknown";
 
       if (!areaMap[location]) {
         areaMap[location] = 0;
@@ -275,11 +299,16 @@ export const getDashboardSummary = async (req, res) => {
     });
 
     const areas = Object.entries(areaMap)
-      .map(([location, count]) => ({
-        location,
-        count,
-      }))
-      .sort((a, b) => b.count - a.count);
+      .map(
+        ([location, count]) => ({
+          location,
+          count,
+        })
+      )
+      .sort(
+        (a, b) =>
+          b.count - a.count
+      );
 
     // =======================================================
     // ACTIVITY
@@ -287,9 +316,14 @@ export const getDashboardSummary = async (req, res) => {
 
     const activity = [
       {
-        date: date || currentStart.toISOString().split("T")[0],
+        date:
+          date ||
+          currentStart
+            .toISOString()
+            .split("T")[0],
 
-        count: currentOrders.length,
+        count:
+          currentOrders.length,
       },
     ];
 
@@ -308,139 +342,140 @@ export const getDashboardSummary = async (req, res) => {
     // NOTIFICATIONS
     // =======================================================
 
-    const pendingOrders = statusMap.Pending?.count || 0;
+    const pendingOrders =
+      statusMap.Pending?.count || 0;
 
-    const notifications = pendingOrders;
+    const notifications =
+      pendingOrders;
 
     // =======================================================
-    // TOP PRODUCTS
+    // TOP SELLING PRODUCTS
+    // SELECTED DATE
     // =======================================================
-    //
-    // এখানে Product model থেকে latest products দেখানো হচ্ছে।
-    // Actual sold quantity যদি MainOrder-এর items থেকে নিতে হয়,
-    // তাহলে MainOrder schema অনুযায়ী আলাদা aggregation লাগবে।
-    //
 
-    const products = await Product.find({})
-      .sort({
-        createdAt: -1,
-      })
-      .limit(4)
-      .lean();
-// =======================================================
-// TOP SELLING PRODUCTS - SELECTED DATE
-// =======================================================
-
-// =======================================================
-// TOP SELLING PRODUCTS - SELECTED DATE
-// =======================================================
-
-const topProducts = await MainOrder.aggregate([
-  {
-    $match: {
-      createdAt: {
-        $gte: currentStart,
-        $lte: currentEnd,
-      },
-    },
-  },
-
-  // products array খুলবে
-  {
-    $unwind: "$products",
-  },
-
-  // product অনুযায়ী quantity যোগ করবে
-  {
-    $group: {
-      _id: "$products.product",
-      sold: {
-        $sum: {
-          $ifNull: ["$products.quantity", 1],
-        },
-      },
-    },
-  },
-
-  // বেশি sold আগে
-  {
-    $sort: {
-      sold: -1,
-    },
-  },
-
-  {
-    $limit: 4,
-  },
-
-  // Product collection থেকে information
-  {
-    $lookup: {
-      from: "products",
-      localField: "_id",
-      foreignField: "_id",
-      as: "product",
-    },
-  },
-
-  {
-    $unwind: "$product",
-  },
-
-  {
-    $project: {
-      _id: 0,
-
-      id: "$product._id",
-
-      name: "$product.name",
-
-      image: {
-        $ifNull: [
-          {
-            $arrayElemAt: [
-              "$product.images",
-              0,
-            ],
+    const topProducts =
+      await MainOrder.aggregate([
+        {
+          $match: {
+            createdAt: {
+              $gte: currentStart,
+              $lte: currentEnd,
+            },
           },
-          "/images.png",
-        ],
-      },
+        },
 
-      sold: 1,
+        // Products array খুলবে
+        {
+          $unwind: "$products",
+        },
 
-      price: {
-        $ifNull: [
-          "$product.discountPrice",
-          "$product.price",
-        ],
-      },
-    },
-  },
-]);
+        // Product অনুযায়ী sold quantity
+        {
+          $group: {
+            _id:
+              "$products.product",
 
+            sold: {
+              $sum: {
+                $ifNull: [
+                  "$products.quantity",
+                  1,
+                ],
+              },
+            },
+          },
+        },
 
+        // বেশি sold আগে
+        {
+          $sort: {
+            sold: -1,
+          },
+        },
 
-    
+        // Top 4
+        {
+          $limit: 4,
+        },
+
+        // Product collection থেকে data
+        {
+          $lookup: {
+            from: "products",
+
+            localField: "_id",
+
+            foreignField: "_id",
+
+            as: "product",
+          },
+        },
+
+        {
+          $unwind:
+            "$product",
+        },
+
+        // Final response
+        {
+          $project: {
+            _id: 0,
+
+            id:
+              "$product._id",
+
+            name:
+              "$product.name",
+
+            image: {
+              $ifNull: [
+                {
+                  $arrayElemAt: [
+                    "$product.images",
+                    0,
+                  ],
+                },
+
+                "/images.png",
+              ],
+            },
+
+            sold: 1,
+
+            price: {
+              $ifNull: [
+                "$product.discountPrice",
+                "$product.price",
+              ],
+            },
+          },
+        },
+      ]);
+
     // =======================================================
     // STORE
     // =======================================================
 
     const store = {
-      store_name: "Apple Gadgets",
-      store_sub: "Admin Dashboard",
+      store_name:
+        "Apple Gadgets",
+
+      store_sub:
+        "Admin Dashboard",
     };
 
     // =======================================================
     // RESPONSE
     // =======================================================
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
 
       date:
         date ||
-        currentStart.toISOString().split("T")[0],
+        currentStart
+          .toISOString()
+          .split("T")[0],
 
       summary,
 
@@ -458,19 +493,26 @@ const topProducts = await MainOrder.aggregate([
 
       store,
     });
+
   } catch (error) {
     console.error(
       "Dashboard Summary API Error:",
       error
     );
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
 
-      message: "Server error",
+      message:
+        "Server error",
 
-      error: error.message,
+      error:
+        error.message,
     });
   }
 };
+
+
+
+
 

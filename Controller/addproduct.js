@@ -1851,3 +1851,75 @@ export const getAllProduct = async (
     });
   }
 };
+
+
+
+
+/* =========================================================
+   GET ALL PRODUCTS / SEARCH PRODUCTS
+   GET /products
+   GET /products?search=iphone
+========================================================= */
+
+export const getProducts = async (req, res) => {
+  try {
+    const { search } = req.query;
+
+    let filter = {};
+
+    /* ============================================
+       SEARCH
+    ============================================ */
+
+    if (search && search.trim()) {
+      filter = {
+        $or: [
+          {
+            name: {
+              $regex: search.trim(),
+              $options: "i",
+            },
+          },
+          {
+            slug: {
+              $regex: search.trim(),
+              $options: "i",
+            },
+          },
+          {
+            sku: {
+              $regex: search.trim(),
+              $options: "i",
+            },
+          },
+        ],
+      };
+    }
+
+    /* ============================================
+       GET PRODUCTS
+    ============================================ */
+
+    const products = await Product.find(filter)
+      .sort({ createdAt: -1 })
+      .lean();
+
+    return res.status(200).json({
+      success: true,
+      count: products.length,
+      products,
+    });
+
+  } catch (error) {
+    console.error(
+      "GET PRODUCTS ERROR:",
+      error
+    );
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to load products",
+      error: error.message,
+    });
+  }
+};

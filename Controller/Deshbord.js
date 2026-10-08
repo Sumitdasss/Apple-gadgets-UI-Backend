@@ -3,9 +3,9 @@ import MainOrder from "../Model/MainOrder.js";
 import Product from "../Model/Product.js";
 import Customer from "../Model/Customer.js";
 
-// =========================================================
-// GROWTH CALCULATION
-// =========================================================
+/* =========================================================
+   GROWTH CALCULATION
+========================================================= */
 
 const calcGrowth = (current, previous) => {
   if (previous === 0) {
@@ -19,21 +19,21 @@ const calcGrowth = (current, previous) => {
   return `${sign}${diff.toFixed(1)}%`;
 };
 
-// =========================================================
-// GET DASHBOARD SUMMARY
-// GET /api/dashboard/summary?date=2026-10-05
-// =========================================================
+/* =========================================================
+   GET DASHBOARD SUMMARY
+   GET /api/dashboard/summary?date=2026-10-10
+========================================================= */
 
 export const getDashboardSummary = async (req, res) => {
   try {
     const { date } = req.query;
 
-    // =======================================================
-    // SELECTED DATE
-    // =======================================================
+    /* =======================================================
+       SELECTED DATE
+    ======================================================= */
 
     const selectedDate = date
-      ? new Date(`${date}T00:00:00`)
+      ? new Date(`${date}T00:00:00+06:00`)
       : new Date();
 
     if (Number.isNaN(selectedDate.getTime())) {
@@ -43,39 +43,42 @@ export const getDashboardSummary = async (req, res) => {
       });
     }
 
-    // =======================================================
-    // CURRENT DAY
-    // =======================================================
+    /* =======================================================
+       BANGLADESH DATE RANGE
+       
+       Example:
+       date = 2026-10-10
 
-    const currentStart = new Date(selectedDate);
-    currentStart.setHours(0, 0, 0, 0);
+       Start:
+       2026-10-10 00:00 Bangladesh
 
-    const currentEnd = new Date(selectedDate);
-    currentEnd.setHours(23, 59, 59, 999);
+       End:
+       2026-10-10 23:59:59.999 Bangladesh
+    ======================================================= */
 
-    // =======================================================
-    // PREVIOUS DAY
-    // =======================================================
+    const currentStart = new Date(
+      `${date || new Date().toISOString().split("T")[0]}T00:00:00+06:00`
+    );
+
+    const currentEnd = new Date(
+      `${date || new Date().toISOString().split("T")[0]}T23:59:59.999+06:00`
+    );
+
+    /* =======================================================
+       PREVIOUS DAY
+       শুধুমাত্র Growth হিসাবের জন্য
+    ======================================================= */
 
     const previousStart = new Date(currentStart);
+    previousStart.setUTCDate(previousStart.getUTCDate() - 1);
 
-    previousStart.setDate(
-      previousStart.getDate() - 1
-    );
+    const previousEnd = new Date(currentEnd);
+    previousEnd.setUTCDate(previousEnd.getUTCDate() - 1);
 
-    previousStart.setHours(0, 0, 0, 0);
-
-    const previousEnd = new Date(currentStart);
-
-    previousEnd.setDate(
-      previousEnd.getDate() - 1
-    );
-
-    previousEnd.setHours(23, 59, 59, 999);
-
-    // =======================================================
-    // CURRENT DAY ORDERS
-    // =======================================================
+    /* =======================================================
+       CURRENT DAY ORDERS
+       শুধু selected date
+    ======================================================= */
 
     const currentOrders = await MainOrder.find({
       createdAt: {
@@ -84,9 +87,10 @@ export const getDashboardSummary = async (req, res) => {
       },
     }).lean();
 
-    // =======================================================
-    // PREVIOUS DAY ORDERS
-    // =======================================================
+    /* =======================================================
+       PREVIOUS DAY ORDERS
+       Growth হিসাবের জন্য
+    ======================================================= */
 
     const previousOrders = await MainOrder.find({
       createdAt: {
@@ -95,95 +99,95 @@ export const getDashboardSummary = async (req, res) => {
       },
     }).lean();
 
-    // =======================================================
-    // TOTAL ORDERS
-    // =======================================================
+    /* =======================================================
+       CURRENT DAY ORDER COUNT
+    ======================================================= */
 
-    const totalOrdersCount =
-      await MainOrder.countDocuments();
+    const currentPeriodOrdersCount = currentOrders.length;
 
-    const currentPeriodOrdersCount =
-      currentOrders.length;
+    const previousPeriodOrdersCount = previousOrders.length;
 
-    const previousPeriodOrdersCount =
-      previousOrders.length;
+    /* =======================================================
+       CURRENT DAY SALES
+    ======================================================= */
 
-    // =======================================================
-    // TOTAL SALES
-    // =======================================================
+    const currentSales = currentOrders.reduce(
+      (acc, order) => {
+        return acc + Number(order.totalAmount || 0);
+      },
+      0
+    );
 
-    const totalSalesAggregate =
-      await MainOrder.aggregate([
-        {
-          $group: {
-            _id: null,
+    /* =======================================================
+       PREVIOUS DAY SALES
+    ======================================================= */
 
-            total: {
-              $sum: {
-                $ifNull: [
-                  "$totalAmount",
-                  0,
-                ],
-              },
-            },
-          },
-        },
-      ]);
+    const previousSales = previousOrders.reduce(
+      (acc, order) => {
+        return acc + Number(order.totalAmount || 0);
+      },
+      0
+    );
 
-    const totalSalesValue =
-      totalSalesAggregate[0]?.total || 0;
+    /* =======================================================
+       PRODUCT COUNT
+       
+       selected date-এ তৈরি হওয়া product
+    ======================================================= */
 
-    // =======================================================
-    // CURRENT DAY SALES
-    // =======================================================
+    const currentItemsCount = await Product.countDocuments({
+      createdAt: {
+        $gte: currentStart,
+        $lte: currentEnd,
+      },
+    });
 
-    const currentSales =
-      currentOrders.reduce(
-        (acc, order) =>
-          acc +
-          Number(
-            order.totalAmount || 0
-          ),
-        0
-      );
+    /* =======================================================
+       CUSTOMER COUNT
+       
+       selected date-এ তৈরি হওয়া customer
+    ======================================================= */
 
-    // =======================================================
-    // PREVIOUS DAY SALES
-    // =======================================================
+    const currentCustomersCount = await Customer.countDocuments({
+      createdAt: {
+        $gte: currentStart,
+        $lte: currentEnd,
+      },
+    });
 
-    const previousSales =
-      previousOrders.reduce(
-        (acc, order) =>
-          acc +
-          Number(
-            order.totalAmount || 0
-          ),
-        0
-      );
+    /* =======================================================
+       PREVIOUS DAY PRODUCT COUNT
+    ======================================================= */
 
-    // =======================================================
-    // PRODUCTS
-    // =======================================================
+    const previousItemsCount = await Product.countDocuments({
+      createdAt: {
+        $gte: previousStart,
+        $lte: previousEnd,
+      },
+    });
 
-    const totalItemsCount =
-      await Product.countDocuments();
+    /* =======================================================
+       PREVIOUS DAY CUSTOMER COUNT
+    ======================================================= */
 
-    // =======================================================
-    // CUSTOMERS
-    // =======================================================
+    const previousCustomersCount = await Customer.countDocuments({
+      createdAt: {
+        $gte: previousStart,
+        $lte: previousEnd,
+      },
+    });
 
-    const totalCustomersCount =
-      await Customer.countDocuments();
-
-    // =======================================================
-    // SUMMARY CARDS
-    // =======================================================
+    /* =======================================================
+       SUMMARY CARDS
+       
+       সব selected date অনুযায়ী
+    ======================================================= */
 
     const summary = [
       {
         key: "orders",
 
-        value: totalOrdersCount,
+        value: currentPeriodOrdersCount,
 
         growth: calcGrowth(
           currentPeriodOrdersCount,
@@ -194,7 +198,7 @@ export const getDashboardSummary = async (req, res) => {
       {
         key: "sales",
 
-        value: totalSalesValue,
+        value: currentSales,
 
         growth: calcGrowth(
           currentSales,
@@ -205,23 +209,31 @@ export const getDashboardSummary = async (req, res) => {
       {
         key: "items",
 
-        value: totalItemsCount,
+        value: currentItemsCount,
 
-        growth: "+0.0%",
+        growth: calcGrowth(
+          currentItemsCount,
+          previousItemsCount
+        ),
       },
 
       {
         key: "customers",
 
-        value: totalCustomersCount,
+        value: currentCustomersCount,
 
-        growth: "+0.0%",
+        growth: calcGrowth(
+          currentCustomersCount,
+          previousCustomersCount
+        ),
       },
     ];
 
-    // =======================================================
-    // ORDER STATUS
-    // =======================================================
+    /* =======================================================
+       ORDER STATUS
+       
+       শুধু selected date-এর orders
+    ======================================================= */
 
     const statusMap = {};
 
@@ -262,26 +274,18 @@ export const getDashboardSummary = async (req, res) => {
 
       statusMap[status].count += 1;
 
-      statusMap[status].total +=
-        Number(
-          order.totalAmount || 0
-        );
+      statusMap[status].total += Number(
+        order.totalAmount || 0
+      );
     });
 
-    const status =
-      Object.values(statusMap);
+    const status = Object.values(statusMap);
 
-    // =======================================================
-    // ORDER AREAS
-    // =======================================================
-    //
-    // MainOrder document:
-    //
-    // selectArea:
-    // "Barisal > Barguna > Patharghata"
-    //
-    // তাই এখান থেকে সরাসরি area নেওয়া হচ্ছে।
-    // =======================================================
+    /* =======================================================
+       ORDER AREAS
+       
+       শুধু selected date-এর orders
+    ======================================================= */
 
     const areaMap = {};
 
@@ -299,20 +303,19 @@ export const getDashboardSummary = async (req, res) => {
     });
 
     const areas = Object.entries(areaMap)
-      .map(
-        ([location, count]) => ({
-          location,
-          count,
-        })
-      )
+      .map(([location, count]) => ({
+        location,
+        count,
+      }))
       .sort(
-        (a, b) =>
-          b.count - a.count
+        (a, b) => b.count - a.count
       );
 
-    // =======================================================
-    // ACTIVITY
-    // =======================================================
+    /* =======================================================
+       ORDER ACTIVITY
+       
+       শুধু selected date
+    ======================================================= */
 
     const activity = [
       {
@@ -322,14 +325,16 @@ export const getDashboardSummary = async (req, res) => {
             .toISOString()
             .split("T")[0],
 
-        count:
-          currentOrders.length,
+        count: currentOrders.length,
       },
     ];
 
-    // =======================================================
-    // STOCK ALERT
-    // =======================================================
+    /* =======================================================
+       STOCK ALERT
+       
+       এটি date based না।
+       কারণ stock বর্তমান অবস্থার data।
+    ======================================================= */
 
     const stockAlerts =
       await Product.countDocuments({
@@ -338,9 +343,11 @@ export const getDashboardSummary = async (req, res) => {
         },
       });
 
-    // =======================================================
-    // NOTIFICATIONS
-    // =======================================================
+    /* =======================================================
+       NOTIFICATIONS
+       
+       selected date-এর pending orders
+    ======================================================= */
 
     const pendingOrders =
       statusMap.Pending?.count || 0;
@@ -348,13 +355,18 @@ export const getDashboardSummary = async (req, res) => {
     const notifications =
       pendingOrders;
 
-    // =======================================================
-    // TOP SELLING PRODUCTS
-    // SELECTED DATE
-    // =======================================================
+    /* =======================================================
+       TOP SELLING PRODUCTS
+       
+       শুধু selected date-এর orders
+    ======================================================= */
 
     const topProducts =
       await MainOrder.aggregate([
+        /* -----------------------------------------------
+           SELECTED DATE FILTER
+        ----------------------------------------------- */
+
         {
           $match: {
             createdAt: {
@@ -364,16 +376,21 @@ export const getDashboardSummary = async (req, res) => {
           },
         },
 
-        // Products array খুলবে
+        /* -----------------------------------------------
+           PRODUCTS ARRAY খুলবে
+        ----------------------------------------------- */
+
         {
           $unwind: "$products",
         },
 
-        // Product অনুযায়ী sold quantity
+        /* -----------------------------------------------
+           PRODUCT অনুযায়ী sold quantity
+        ----------------------------------------------- */
+
         {
           $group: {
-            _id:
-              "$products.product",
+            _id: "$products.product",
 
             sold: {
               $sum: {
@@ -386,19 +403,28 @@ export const getDashboardSummary = async (req, res) => {
           },
         },
 
-        // বেশি sold আগে
+        /* -----------------------------------------------
+           বেশি sold আগে
+        ----------------------------------------------- */
+
         {
           $sort: {
             sold: -1,
           },
         },
 
-        // Top 4
+        /* -----------------------------------------------
+           TOP 4
+        ----------------------------------------------- */
+
         {
           $limit: 4,
         },
 
-        // Product collection থেকে data
+        /* -----------------------------------------------
+           Product collection থেকে data
+        ----------------------------------------------- */
+
         {
           $lookup: {
             from: "products",
@@ -411,21 +437,25 @@ export const getDashboardSummary = async (req, res) => {
           },
         },
 
+        /* -----------------------------------------------
+           Product পাওয়া গেলে খুলবে
+        ----------------------------------------------- */
+
         {
-          $unwind:
-            "$product",
+          $unwind: "$product",
         },
 
-        // Final response
+        /* -----------------------------------------------
+           Final response
+        ----------------------------------------------- */
+
         {
           $project: {
             _id: 0,
 
-            id:
-              "$product._id",
+            id: "$product._id",
 
-            name:
-              "$product.name",
+            name: "$product.name",
 
             image: {
               $ifNull: [
@@ -452,21 +482,19 @@ export const getDashboardSummary = async (req, res) => {
         },
       ]);
 
-    // =======================================================
-    // STORE
-    // =======================================================
+    /* =======================================================
+       STORE
+    ======================================================= */
 
     const store = {
-      store_name:
-        "Apple Gadgets",
+      store_name: "Apple Gadgets",
 
-      store_sub:
-        "Admin Dashboard",
+      store_sub: "Admin Dashboard",
     };
 
-    // =======================================================
-    // RESPONSE
-    // =======================================================
+    /* =======================================================
+       RESPONSE
+    ======================================================= */
 
     return res.status(200).json({
       success: true,
@@ -493,7 +521,6 @@ export const getDashboardSummary = async (req, res) => {
 
       store,
     });
-
   } catch (error) {
     console.error(
       "Dashboard Summary API Error:",
@@ -503,16 +530,9 @@ export const getDashboardSummary = async (req, res) => {
     return res.status(500).json({
       success: false,
 
-      message:
-        "Server error",
+      message: "Server error",
 
-      error:
-        error.message,
+      error: error.message,
     });
   }
 };
-
-
-
-
-

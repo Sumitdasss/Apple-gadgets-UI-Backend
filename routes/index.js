@@ -1,7 +1,7 @@
 import express from 'express';
 
 import upload from '../midddlewere/upload.js';
-import { addProduct,getAllProduct} from '../Controller/addproduct.js';
+import { addProduct,getAllProduct, getProducts} from '../Controller/addproduct.js';
 import { receiveWebhook, verifyWebhook } from '../Controller/messengerController.js';
 import { checkFacebookToken } from '../Service/messengerController.js';
 import { createMainCategory, createSubCategory,createChildCategory,createSubChildCategory,getFullCategoryTree } from '../Controller/Catgorihandelar.js';
@@ -39,6 +39,7 @@ router.post("/sub-child", createSubChildCategory);
 router.get("/tree", getFullCategoryTree);
 router.get("/order-activity", OderActivity);
 router.get("/summary", getDashboardSummary);
+router.get("/products", getProducts);
 
 
 

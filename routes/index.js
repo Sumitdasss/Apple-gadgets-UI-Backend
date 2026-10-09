@@ -19,6 +19,7 @@ import {
   createChildCategory,
   createSubChildCategory,
   getFullCategoryTree,
+  updateCategoryBanner,
 } from "../Controller/Catgorihandelar.js";
 import {  createOrder  } from "../Controller/CREATODER.js";
 import { OderActivity } from "../Controller/ShowOderactivity.js";
@@ -48,10 +49,12 @@ router.get("/webhook/check-token", checkFacebookToken);
 router.get("/getALLproducts", getAllProduct);
 router.post("/CreateOrder", createOrder);
 
-router.post("/main", createMainCategory);
-router.post("/sub", createSubCategory);
-router.post("/child", createChildCategory);
-router.post("/sub-child", createSubChildCategory);
+router.post( "/main", upload.fields([ { name: "image", maxCount: 1 }, { name: "bannerImage", maxCount: 1 }, ]), createMainCategory ); 
+// 
+
+router.post( "/sub", upload.fields([ { name: "image", maxCount: 1 }, { name: "bannerImage", maxCount: 1 }, ]), createSubCategory ); 
+ router.post( "/child", upload.fields([ { name: "image", maxCount: 1 }, { name: "bannerImage", maxCount: 1 }, ]), createChildCategory ); 
+  router.post( "/sub-child", upload.fields([ { name: "image", maxCount: 1 }, { name: "bannerImage", maxCount: 1 }, ]), createSubChildCategory );
 router.get("/tree", getFullCategoryTree);
 router.get("/order-activity", OderActivity);
 router.get("/summary", getDashboardSummary);
@@ -60,7 +63,10 @@ router.get("/order", getOrders);
 router.patch("/bulk-update", bulkUpdateOrders);
 router.put("/orders/:id", updateOrder);
 router.delete("/orders/:id", deleteOrder);
-
+router.patch(
+  "/:type/:id/banner",
+  updateCategoryBanner
+);
 router.get("/:id", getProductById);
 router.put(
   "/updateproduct/:id",

@@ -1,3 +1,4 @@
+
 import mongoose from "mongoose";
 
 // =====================================================
@@ -26,9 +27,24 @@ const mainCategorySchema = new mongoose.Schema(
       trim: true,
     },
 
+    // Category thumbnail
     image: {
       type: String,
       default: "",
+    },
+
+    // Category banner URL
+    bannerImage: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+
+    // Cloudinary public ID
+    bannerPublicId: {
+      type: String,
+      default: "",
+      trim: true,
     },
 
     isActive: {
@@ -109,11 +125,11 @@ const mainCategorySchema = new mongoose.Schema(
     toObject: {
       virtuals: true,
     },
-  },
+  }
 );
 
 // =====================================================
-// VIRTUALS
+// MAIN CATEGORY VIRTUALS
 // =====================================================
 
 mainCategorySchema.virtual("subCategoryDetails", {
@@ -165,9 +181,24 @@ const subCategorySchema = new mongoose.Schema(
       trim: true,
     },
 
+    // Category thumbnail
     image: {
       type: String,
       default: "",
+    },
+
+    // Category banner URL
+    bannerImage: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+
+    // Cloudinary public ID
+    bannerPublicId: {
+      type: String,
+      default: "",
+      trim: true,
     },
 
     isActive: {
@@ -227,18 +258,19 @@ const subCategorySchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-
     toJSON: {
       virtuals: true,
     },
-
     toObject: {
       virtuals: true,
     },
-  },
+  }
 );
 
-// Virtual
+// =====================================================
+// SUB CATEGORY VIRTUALS
+// =====================================================
+
 subCategorySchema.virtual("childCategoryDetails", {
   ref: "ChildCategory",
   localField: "_id",
@@ -288,9 +320,24 @@ const childCategorySchema = new mongoose.Schema(
       trim: true,
     },
 
+    // Category thumbnail
     image: {
       type: String,
       default: "",
+    },
+
+    // Category banner URL
+    bannerImage: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+
+    // Cloudinary public ID
+    bannerPublicId: {
+      type: String,
+      default: "",
+      trim: true,
     },
 
     isActive: {
@@ -335,18 +382,19 @@ const childCategorySchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-
     toJSON: {
       virtuals: true,
     },
-
     toObject: {
       virtuals: true,
     },
-  },
+  }
 );
 
-// Virtual
+// =====================================================
+// CHILD CATEGORY VIRTUALS
+// =====================================================
+
 childCategorySchema.virtual("subChildCategoryDetails", {
   ref: "SubChildCategory",
   localField: "_id",
@@ -396,9 +444,24 @@ const subChildCategorySchema = new mongoose.Schema(
       trim: true,
     },
 
+    // Category thumbnail
     image: {
       type: String,
       default: "",
+    },
+
+    // Category banner URL
+    bannerImage: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+
+    // Cloudinary public ID
+    bannerPublicId: {
+      type: String,
+      default: "",
+      trim: true,
     },
 
     isActive: {
@@ -413,15 +476,13 @@ const subChildCategorySchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-
     toJSON: {
       virtuals: true,
     },
-
     toObject: {
       virtuals: true,
     },
-  },
+  }
 );
 
 // =====================================================

@@ -1,3 +1,4 @@
+
 import multer from "multer";
 import { CloudinaryStorage } from "multer-storage-cloudinary";
 import cloudinary from "../config/cloudnary.js";
@@ -8,31 +9,57 @@ const storage = new CloudinaryStorage({
   params: async (req, file) => {
     const isImage = file.mimetype.startsWith("image/");
 
-    const ext =
-      file.mimetype === "application/pdf"
-        ? "pdf"
-        : file.mimetype === "application/msword"
-          ? "doc"
-          : "docx";
+    const allowedImageTypes = [
+      "image/jpeg",
+      "image/png",
+      "image/webp",
+      "image/jpg",
+    ];
 
-    // extension সহ unique নাম বানানো
+    if (!allowedImageTypes.includes(file.mimetype)) {
+      throw new Error("Only JPG, PNG and WEBP images are allowed.");
+    }
+
     const baseName = file.originalname
-      .replace(/\.[^/.]+$/, "") // আসল extension বাদ
-      .replace(/\s+/g, "_"); // space সরানো (safe url এর জন্য)
+      .replace(/\.[^/.]+$/, "")
+      .replace(/[^a-zA-Z0-9_-]/g, "_")
+      .slice(0, 80);
 
     return {
-      folder: isImage ? "students/images" : "students/files",
-      resource_type: isImage ? "image" : "raw",
-      format: isImage ? undefined : ext,
-      public_id: isImage ? undefined : `${baseName}-${Date.now()}.${ext}`, // 👈 এখানেই extension force করা হচ্ছে
-      allowed_formats: isImage
-        ? ["jpg", "jpeg", "png", "webp"]
-        : ["pdf", "doc", "docx"],
+      folder: "apple-gadgets/categories",
+
+      resource_type: "image",
+
+      allowed_formats: ["jpg", "jpeg", "png", "webp"],
+
+      public_id: `${baseName}-${Date.now()}`,
     };
   },
 });
+
+const fileFilter = (req, file, cb) => {
+  const allowedTypes = [
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "image/jpg",
+  ];
+
+  if (allowedTypes.includes(file.mimetype)) {
+    cb(null, true);
+  } else {
+    cb(new Error("Only JPG, PNG and WEBP images are allowed."));
+  }
+};
+
 const upload = multer({
   storage,
+  fileFilter,
+  limits: {
+    fileSize: 5 * 1024 * 1024,
+    files: 2,
+  },
 });
 
 export default upload;
+

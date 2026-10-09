@@ -1,3 +1,4 @@
+
 import MainOrder from "../Model/MainOrder.js";
 import Product from "../Model/Product.js";
 import Customer from "../Model/Customer.js";
@@ -24,14 +25,12 @@ const getCached = (key) => {
 };
 
 const setCached = (key, data) => {
-  // Remove expired entries first.
   for (const [cacheKey, item] of dashboardCache) {
     if (Date.now() >= item.expiresAt) {
       dashboardCache.delete(cacheKey);
     }
   }
 
-  // Keep the cache size limited.
   if (dashboardCache.size >= MAX_CACHE_ITEMS && !dashboardCache.has(key)) {
     const oldestKey = dashboardCache.keys().next().value;
 
@@ -52,6 +51,23 @@ export const clearDashboardCache = () => {
 };
 
 /* =========================================================
+   ORDER STATUSES
+   Must match frontend STATUSES
+========================================================= */
+
+const ORDER_STATUSES = [
+  "pending",
+  "confirmed",
+  "processing",
+  "ready_for_shipment",
+  "handed_over_to_courier",
+  "shipped",
+  "delivered",
+  "returned",
+  "cancelled",
+];
+
+/* =========================================================
    BANGLADESH DATE HELPERS
 ========================================================= */
 
@@ -70,7 +86,6 @@ const isValidDate = (date) => {
 
   const [year, month, day] = date.split("-").map(Number);
 
-  // Validate calendar date without timezone conversion issues.
   const parsed = new Date(Date.UTC(year, month - 1, day));
 
   return (
@@ -83,11 +98,15 @@ const isValidDate = (date) => {
 const getDateRangeBD = (date) => {
   const [year, month, day] = date.split("-").map(Number);
 
-  // Bangladesh is UTC+6.
-  const start = new Date(Date.UTC(year, month - 1, day) - 6 * 60 * 60 * 1000);
+  // Bangladesh timezone: UTC+6
+  const start = new Date(
+    Date.UTC(year, month - 1, day) - 6 * 60 * 60 * 1000,
+  );
 
   const end = new Date(
-    Date.UTC(year, month - 1, day + 1) - 6 * 60 * 60 * 1000 - 1,
+    Date.UTC(year, month - 1, day + 1) -
+      6 * 60 * 60 * 1000 -
+      1,
   );
 
   return { start, end };
@@ -96,7 +115,9 @@ const getDateRangeBD = (date) => {
 const getPreviousDateBD = (date) => {
   const [year, month, day] = date.split("-").map(Number);
 
-  const previous = new Date(Date.UTC(year, month - 1, day - 1));
+  const previous = new Date(
+    Date.UTC(year, month - 1, day - 1),
+  );
 
   const y = previous.getUTCFullYear();
   const m = String(previous.getUTCMonth() + 1).padStart(2, "0");
@@ -120,15 +141,25 @@ const calcGrowth = (current, previous) => {
 ========================================================= */
 
 const buildOrderPipeline = (filter) => [
-  { $match: filter },
+  {
+    $match: filter,
+  },
 
   {
     $facet: {
+      /* ===============================================
+         SUMMARY
+      =============================================== */
+
       summary: [
         {
           $group: {
             _id: null,
-            orders: { $sum: 1 },
+
+            orders: {
+              $sum: 1,
+            },
+
             sales: {
               $sum: {
                 $convert: {
@@ -143,6 +174,10 @@ const buildOrderPipeline = (filter) => [
         },
       ],
 
+      /* ===============================================
+         STATUS COUNTS
+      =============================================== */
+
       statuses: [
         {
           $project: {
@@ -152,7 +187,12 @@ const buildOrderPipeline = (filter) => [
                   input: {
                     $ifNull: [
                       "$status",
-                      { $ifNull: ["$orderStatus", "Pending"] },
+                      {
+                        $ifNull: [
+                          "$orderStatus",
+                          "pending",
+                        ],
+                      },
                     ],
                   },
                 },
@@ -177,34 +217,113 @@ const buildOrderPipeline = (filter) => [
                 branches: [
                   {
                     case: {
-                      $in: ["$rawStatus", ["completed", "complete"]],
+                      $in: [
+                        "$rawStatus",
+                        ["pending"],
+                      ],
                     },
-                    then: "Completed",
+                    then: "pending",
                   },
-                  {
-                    case: { $eq: ["$rawStatus", "delivered"] },
-                    then: "Delivered",
-                  },
+
                   {
                     case: {
-                      $in: ["$rawStatus", ["incomplete", "failed"]],
+                      $in: [
+                        "$rawStatus",
+                        ["confirmed", "confirm"],
+                      ],
                     },
-                    then: "Incomplete",
+                    then: "confirmed",
                   },
+
                   {
                     case: {
-                      $in: ["$rawStatus", ["cancelled", "canceled"]],
+                      $in: [
+                        "$rawStatus",
+                        ["processing", "in progress"],
+                      ],
                     },
-                    then: "Cancelled",
+                    then: "processing",
                   },
+
                   {
-                    case: { $eq: ["$rawStatus", "processing"] },
-                    then: "Processing",
+                    case: {
+                      $in: [
+                        "$rawStatus",
+                        [
+                          "ready_for_shipment",
+                          "ready for shipment",
+                          "ready-to-ship",
+                          "ready to ship",
+                        ],
+                      ],
+                    },
+                    then: "ready_for_shipment",
+                  },
+
+                  {
+                    case: {
+                      $in: [
+                        "$rawStatus",
+                        [
+                          "handed_over_to_courier",
+                          "handed over to courier",
+                          "handed-over-to-courier",
+                        ],
+                      ],
+                    },
+                    then: "handed_over_to_courier",
+                  },
+
+                  {
+                    case: {
+                      $in: [
+                        "$rawStatus",
+                        ["shipped", "dispatched"],
+                      ],
+                    },
+                    then: "shipped",
+                  },
+
+                  {
+                    case: {
+                      $in: [
+                        "$rawStatus",
+                        [
+                          "delivered",
+                          "completed",
+                          "complete",
+                        ],
+                      ],
+                    },
+                    then: "delivered",
+                  },
+
+                  {
+                    case: {
+                      $in: [
+                        "$rawStatus",
+                        ["returned", "return"],
+                      ],
+                    },
+                    then: "returned",
+                  },
+
+                  {
+                    case: {
+                      $in: [
+                        "$rawStatus",
+                        ["cancelled", "canceled", "cancel"],
+                      ],
+                    },
+                    then: "cancelled",
                   },
                 ],
-                default: "Pending",
+
+                // Unknown statuses default to pending.
+                default: "pending",
               },
             },
+
             totalAmount: 1,
           },
         },
@@ -212,8 +331,14 @@ const buildOrderPipeline = (filter) => [
         {
           $group: {
             _id: "$status",
-            count: { $sum: 1 },
-            total: { $sum: "$totalAmount" },
+
+            count: {
+              $sum: 1,
+            },
+
+            total: {
+              $sum: "$totalAmount",
+            },
           },
         },
 
@@ -226,6 +351,10 @@ const buildOrderPipeline = (filter) => [
           },
         },
       ],
+
+      /* ===============================================
+         CUSTOMER AREAS
+      =============================================== */
 
       areas: [
         {
@@ -241,9 +370,12 @@ const buildOrderPipeline = (filter) => [
                     },
                   },
                 },
+
                 in: {
                   $cond: [
-                    { $eq: ["$$trimmedArea", ""] },
+                    {
+                      $eq: ["$$trimmedArea", ""],
+                    },
                     "Unknown",
                     "$$trimmedArea",
                   ],
@@ -256,11 +388,18 @@ const buildOrderPipeline = (filter) => [
         {
           $group: {
             _id: "$location",
-            count: { $sum: 1 },
+
+            count: {
+              $sum: 1,
+            },
           },
         },
 
-        { $sort: { count: -1 } },
+        {
+          $sort: {
+            count: -1,
+          },
+        },
 
         {
           $project: {
@@ -270,6 +409,10 @@ const buildOrderPipeline = (filter) => [
           },
         },
       ],
+
+      /* ===============================================
+         DAILY ACTIVITY
+      =============================================== */
 
       activity: [
         {
@@ -281,7 +424,11 @@ const buildOrderPipeline = (filter) => [
                 timezone: "Asia/Dhaka",
               },
             },
-            count: { $sum: 1 },
+
+            count: {
+              $sum: 1,
+            },
+
             sales: {
               $sum: {
                 $convert: {
@@ -295,7 +442,11 @@ const buildOrderPipeline = (filter) => [
           },
         },
 
-        { $sort: { _id: 1 } },
+        {
+          $sort: {
+            _id: 1,
+          },
+        },
 
         {
           $project: {
@@ -313,6 +464,7 @@ const buildOrderPipeline = (filter) => [
 
 /* =========================================================
    DASHBOARD SUMMARY
+
    GET /api/dashboard/summary?date=all
    GET /api/dashboard/summary?date=YYYY-MM-DD
 ========================================================= */
@@ -321,13 +473,18 @@ export const getDashboardSummary = async (req, res) => {
   try {
     const rawDate = req.query.date;
 
-    // No date, empty date, or date=all means all-time data.
+    // Missing date, empty date or date=all means all-time data.
     const allTime =
-      rawDate === undefined || rawDate === "" || rawDate === "all";
+      rawDate === undefined ||
+      rawDate === "" ||
+      rawDate === "all";
 
     const selectedDate = allTime ? getTodayBD() : rawDate;
 
-    // Validate before querying MongoDB.
+    /* ===============================================
+       VALIDATE DATE
+    =============================================== */
+
     if (!allTime && !isValidDate(selectedDate)) {
       return res.status(400).json({
         success: false,
@@ -336,17 +493,30 @@ export const getDashboardSummary = async (req, res) => {
       });
     }
 
-    const cacheKey = allTime ? "dashboard:all" : `dashboard:${selectedDate}`;
+    /* ===============================================
+       CACHE
+    =============================================== */
+
+    const cacheKey = allTime
+      ? "dashboard:all"
+      : `dashboard:${selectedDate}`;
 
     const cached = getCached(cacheKey);
 
     if (cached) {
       res.set("X-Dashboard-Cache", "HIT");
+
       return res.status(200).json(cached);
     }
 
+    /* ===============================================
+       DATE RANGES
+    =============================================== */
+
     const currentRange = getDateRangeBD(selectedDate);
+
     const previousDate = getPreviousDateBD(selectedDate);
+
     const previousRange = getDateRangeBD(previousDate);
 
     const currentFilter = allTime
@@ -365,6 +535,10 @@ export const getDashboardSummary = async (req, res) => {
       },
     };
 
+    /* ===============================================
+       PARALLEL DATABASE QUERIES
+    =============================================== */
+
     const [
       currentResult,
       previousResult,
@@ -376,31 +550,52 @@ export const getDashboardSummary = async (req, res) => {
       availableDatesResult,
       topProducts,
     ] = await Promise.all([
-      MainOrder.aggregate(buildOrderPipeline(currentFilter)),
+      // Current dashboard data
+      MainOrder.aggregate(
+        buildOrderPipeline(currentFilter),
+      ),
 
+      // Previous day data for growth calculation
       allTime
         ? Promise.resolve([])
-        : MainOrder.aggregate(buildOrderPipeline(previousFilter)),
+        : MainOrder.aggregate(
+            buildOrderPipeline(previousFilter),
+          ),
 
-      // Preserve the original behavior: products/customers filtered by createdAt.
+      // Products created within the selected date
       Product.countDocuments(currentFilter),
 
+      // Customers created within the selected date
       Customer.countDocuments(currentFilter),
 
-      allTime ? Promise.resolve(0) : Product.countDocuments(previousFilter),
+      // Previous day's products
+      allTime
+        ? Promise.resolve(0)
+        : Product.countDocuments(previousFilter),
 
-      allTime ? Promise.resolve(0) : Customer.countDocuments(previousFilter),
+      // Previous day's customers
+      allTime
+        ? Promise.resolve(0)
+        : Customer.countDocuments(previousFilter),
 
+      // Low stock products
       Product.countDocuments({
-        stock: { $lte: 5 },
+        stock: {
+          $lte: 5,
+        },
       }),
 
+      // Available order dates
       MainOrder.aggregate([
         {
           $match: {
-            createdAt: { $exists: true, $ne: null },
+            createdAt: {
+              $exists: true,
+              $ne: null,
+            },
           },
         },
+
         {
           $group: {
             _id: {
@@ -412,8 +607,17 @@ export const getDashboardSummary = async (req, res) => {
             },
           },
         },
-        { $sort: { _id: -1 } },
-        { $limit: 365 },
+
+        {
+          $sort: {
+            _id: -1,
+          },
+        },
+
+        {
+          $limit: 365,
+        },
+
         {
           $project: {
             _id: 0,
@@ -422,24 +626,44 @@ export const getDashboardSummary = async (req, res) => {
         },
       ]),
 
+      // Top-selling products
       MainOrder.aggregate([
-        ...(allTime ? [] : [{ $match: currentFilter }]),
+        ...(allTime
+          ? []
+          : [
+              {
+                $match: currentFilter,
+              },
+            ]),
 
-        { $unwind: "$products" },
+        {
+          $unwind: "$products",
+        },
 
         {
           $group: {
             _id: "$products.product",
+
             sold: {
               $sum: {
-                $ifNull: ["$products.quantity", 1],
+                $ifNull: [
+                  "$products.quantity",
+                  1,
+                ],
               },
             },
           },
         },
 
-        { $sort: { sold: -1 } },
-        { $limit: 4 },
+        {
+          $sort: {
+            sold: -1,
+          },
+        },
+
+        {
+          $limit: 4,
+        },
 
         {
           $lookup: {
@@ -450,31 +674,54 @@ export const getDashboardSummary = async (req, res) => {
           },
         },
 
-        { $unwind: "$product" },
+        {
+          $unwind: "$product",
+        },
 
         {
           $project: {
             _id: 0,
+
             id: "$product._id",
+
             name: {
-              $ifNull: ["$product.name", "Unnamed Product"],
+              $ifNull: [
+                "$product.name",
+                "Unnamed Product",
+              ],
             },
+
             image: {
               $ifNull: [
-                { $arrayElemAt: ["$product.images", 0] },
+                {
+                  $arrayElemAt: [
+                    "$product.images",
+                    0,
+                  ],
+                },
                 "/images.png",
               ],
             },
+
             sold: 1,
+
             price: {
-              $ifNull: ["$product.discountPrice", "$product.price"],
+              $ifNull: [
+                "$product.discountPrice",
+                "$product.price",
+              ],
             },
           },
         },
       ]),
     ]);
 
+    /* ===============================================
+       CURRENT AND PREVIOUS RESULTS
+    =============================================== */
+
     const current = currentResult[0] || {};
+
     const previous = previousResult[0] || {};
 
     const currentSummary = current.summary?.[0] || {
@@ -487,43 +734,101 @@ export const getDashboardSummary = async (req, res) => {
       sales: 0,
     };
 
-    const currentOrdersCount = currentSummary.orders || 0;
-    const currentSales = currentSummary.sales || 0;
+    const currentOrdersCount =
+      currentSummary.orders || 0;
 
-    const previousOrdersCount = previousSummary.orders || 0;
-    const previousSales = previousSummary.sales || 0;
+    const currentSales =
+      currentSummary.sales || 0;
+
+    const previousOrdersCount =
+      previousSummary.orders || 0;
+
+    const previousSales =
+      previousSummary.sales || 0;
+
+    /* ===============================================
+       SUMMARY CARDS
+    =============================================== */
 
     const summary = [
       {
         key: "orders",
         value: currentOrdersCount,
+
         growth: allTime
           ? null
-          : calcGrowth(currentOrdersCount, previousOrdersCount),
+          : calcGrowth(
+              currentOrdersCount,
+              previousOrdersCount,
+            ),
       },
+
       {
         key: "sales",
         value: currentSales,
-        growth: allTime ? null : calcGrowth(currentSales, previousSales),
+
+        growth: allTime
+          ? null
+          : calcGrowth(
+              currentSales,
+              previousSales,
+            ),
       },
+
       {
         key: "items",
         value: currentItemsCount,
+
         growth: allTime
           ? null
-          : calcGrowth(currentItemsCount, previousItemsCount),
+          : calcGrowth(
+              currentItemsCount,
+              previousItemsCount,
+            ),
       },
+
       {
         key: "customers",
         value: currentCustomersCount,
+
         growth: allTime
           ? null
-          : calcGrowth(currentCustomersCount, previousCustomersCount),
+          : calcGrowth(
+              currentCustomersCount,
+              previousCustomersCount,
+            ),
       },
     ];
 
-    const status = current.statuses || [];
+    /* ===============================================
+       STATUS COUNTS
+
+       Always return all 9 statuses, even when count = 0.
+    =============================================== */
+
+    const aggregatedStatuses = current.statuses || [];
+
+    const status = ORDER_STATUSES.map((statusName) => {
+      const matchedStatus = aggregatedStatuses.find(
+        (item) => item.status === statusName,
+      );
+
+      return {
+        status: statusName,
+        count: matchedStatus?.count || 0,
+        total: matchedStatus?.total || 0,
+      };
+    });
+
+    /* ===============================================
+       AREAS
+    =============================================== */
+
     const areas = current.areas || [];
+
+    /* ===============================================
+       ACTIVITY
+    =============================================== */
 
     const activity = allTime
       ? current.activity || []
@@ -536,38 +841,81 @@ export const getDashboardSummary = async (req, res) => {
           },
         ];
 
+    /* ===============================================
+       NOTIFICATIONS
+
+       Pending orders count
+    =============================================== */
+
     const notifications =
-      status.find((item) => item.status === "Pending")?.count || 0;
+      status.find(
+        (item) => item.status === "pending",
+      )?.count || 0;
+
+    /* ===============================================
+       FINAL RESPONSE
+    =============================================== */
 
     const response = {
       success: true,
-      mode: allTime ? "all-time" : "selected-date",
-      date: allTime ? null : selectedDate,
+
+      mode: allTime
+        ? "all-time"
+        : "selected-date",
+
+      date: allTime
+        ? null
+        : selectedDate,
+
       summary,
+
       activity,
+
       topProducts,
+
       status,
+
       areas,
-      availableDates: availableDatesResult.map((item) => item.date),
+
+      availableDates: availableDatesResult.map(
+        (item) => item.date,
+      ),
+
       stockAlerts,
+
       notifications,
+
       store: {
         store_name: "Apple Gadgets",
         store_sub: "Admin Dashboard",
       },
     };
 
+    /* ===============================================
+       SAVE CACHE AND SEND RESPONSE
+    =============================================== */
+
     setCached(cacheKey, response);
 
     res.set("X-Dashboard-Cache", "MISS");
+
     return res.status(200).json(response);
   } catch (error) {
-    console.error("Dashboard Summary API Error:", error);
+    console.error(
+      "Dashboard Summary API Error:",
+      error,
+    );
 
     return res.status(500).json({
       success: false,
+
       message: "Dashboard data could not be loaded.",
-      error: process.env.NODE_ENV === "development" ? error.message : undefined,
+
+      error:
+        process.env.NODE_ENV === "development"
+          ? error.message
+          : undefined,
     });
   }
 };
+

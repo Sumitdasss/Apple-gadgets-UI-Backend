@@ -20,9 +20,10 @@ import {
   createSubChildCategory,
   getFullCategoryTree,
 } from "../Controller/Catgorihandelar.js";
-import { createOrder } from "../Controller/CREATODER.js";
+import {  createOrder  } from "../Controller/CREATODER.js";
 import { OderActivity } from "../Controller/ShowOderactivity.js";
 import { getDashboardSummary } from "../Controller/Deshbord.js";
+import { bulkUpdateOrders, deleteOrder, getOrders, updateOrder } from "../Controller/OrderMange.js";
 const router = express.Router();
 router.post(
   "/addproduct",
@@ -55,6 +56,11 @@ router.get("/tree", getFullCategoryTree);
 router.get("/order-activity", OderActivity);
 router.get("/summary", getDashboardSummary);
 router.get("/products", getProducts);
+router.get("/order", getOrders);
+router.patch("/bulk-update", bulkUpdateOrders);
+router.put("/orders/:id", updateOrder);
+router.delete("/orders/:id", deleteOrder);
+
 router.get("/:id", getProductById);
 router.put(
   "/updateproduct/:id",
@@ -70,5 +76,8 @@ router.put(
   ]),
   updateProduct,
 );
+
+
+
 
 export default router;

@@ -1,11 +1,92 @@
-
 import MainOrder from "../Model/MainOrder.js";
 import Product from "../Model/Product.js";
 import Customer from "../Model/Customer.js";
 
 /* =========================================================
-   GROWTH CALCULATION
+   SHORT CACHE
+   Same dashboard request can reuse data for 15 seconds.
 ========================================================= */
+
+const dashboardCache = new Map();
+const CACHE_TTL = 15 * 1000;
+const MAX_CACHE_ITEMS = 100;
+
+const getCached = (key) => {
+  const item = dashboardCache.get(key);
+
+  if (!item) return null;
+
+  if (Date.now() >= item.expiresAt) {
+    dashboardCache.delete(key);
+    return null;
+  }
+
+  return item.data;
+};
+
+const setCached = (key, data) => {
+  if (dashboardCache.size >= MAX_CACHE_ITEMS) {
+    const firstKey = dashboardCache.keys().next().value;
+    if (firstKey) dashboardCache.delete(firstKey);
+  }
+
+  dashboardCache.set(key, {
+    data,
+    expiresAt: Date.now() + CACHE_TTL,
+  });
+};
+
+// Call this after creating, updating, or deleting orders/products.
+export const clearDashboardCache = () => {
+  dashboardCache.clear();
+};
+
+/* =========================================================
+   BANGLADESH DATE HELPERS
+========================================================= */
+
+const getTodayBD = () =>
+  new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Dhaka",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+
+const getDateRangeBD = (date) => ({
+  start: new Date(`${date}T00:00:00+06:00`),
+  end: new Date(`${date}T23:59:59.999+06:00`),
+});
+
+const isValidDate = (date) => {
+  if (
+    typeof date !== "string" ||
+    !/^\d{4}-\d{2}-\d{2}$/.test(date)
+  ) {
+    return false;
+  }
+
+  const [year, month, day] = date.split("-").map(Number);
+  const parsed = new Date(`${date}T00:00:00+06:00`);
+
+  return (
+    !Number.isNaN(parsed.getTime()) &&
+    parsed.getUTCFullYear() === year &&
+    parsed.getUTCMonth() + 1 === month &&
+    parsed.getUTCDate() === day
+  );
+};
+
+const getPreviousDateBD = (date) => {
+  const { start } = getDateRangeBD(date);
+
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Dhaka",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(start.getTime() - 1));
+};
 
 const calcGrowth = (current, previous) => {
   if (previous === 0) {
@@ -14,464 +95,363 @@ const calcGrowth = (current, previous) => {
 
   const diff = ((current - previous) / previous) * 100;
 
-  const sign = diff >= 0 ? "+" : "";
-
-  return `${sign}${diff.toFixed(1)}%`;
+  return `${diff >= 0 ? "+" : ""}${diff.toFixed(1)}%`;
 };
 
 /* =========================================================
-   GET DASHBOARD SUMMARY
-   GET /api/dashboard/summary?date=2026-10-10
+   ORDER AGGREGATION
 ========================================================= */
 
-export const getDashboardSummary = async (req, res) => {
-  try {
-    const { date } = req.query;
-
-    /* =======================================================
-       SELECTED DATE
-    ======================================================= */
-
-    const selectedDate = date
-      ? new Date(`${date}T00:00:00+06:00`)
-      : new Date();
-
-    if (Number.isNaN(selectedDate.getTime())) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid date format. Use YYYY-MM-DD",
-      });
-    }
-
-    /* =======================================================
-       BANGLADESH DATE RANGE
-       
-       Example:
-       date = 2026-10-10
-
-       Start:
-       2026-10-10 00:00 Bangladesh
-
-       End:
-       2026-10-10 23:59:59.999 Bangladesh
-    ======================================================= */
-
-    const currentStart = new Date(
-      `${date || new Date().toISOString().split("T")[0]}T00:00:00+06:00`
-    );
-
-    const currentEnd = new Date(
-      `${date || new Date().toISOString().split("T")[0]}T23:59:59.999+06:00`
-    );
-
-    /* =======================================================
-       PREVIOUS DAY
-       শুধুমাত্র Growth হিসাবের জন্য
-    ======================================================= */
-
-    const previousStart = new Date(currentStart);
-    previousStart.setUTCDate(previousStart.getUTCDate() - 1);
-
-    const previousEnd = new Date(currentEnd);
-    previousEnd.setUTCDate(previousEnd.getUTCDate() - 1);
-
-    /* =======================================================
-       CURRENT DAY ORDERS
-       শুধু selected date
-    ======================================================= */
-
-    const currentOrders = await MainOrder.find({
-      createdAt: {
-        $gte: currentStart,
-        $lte: currentEnd,
-      },
-    }).lean();
-
-    /* =======================================================
-       PREVIOUS DAY ORDERS
-       Growth হিসাবের জন্য
-    ======================================================= */
-
-    const previousOrders = await MainOrder.find({
-      createdAt: {
-        $gte: previousStart,
-        $lte: previousEnd,
-      },
-    }).lean();
-
-    /* =======================================================
-       CURRENT DAY ORDER COUNT
-    ======================================================= */
-
-    const currentPeriodOrdersCount = currentOrders.length;
-
-    const previousPeriodOrdersCount = previousOrders.length;
-
-    /* =======================================================
-       CURRENT DAY SALES
-    ======================================================= */
-
-    const currentSales = currentOrders.reduce(
-      (acc, order) => {
-        return acc + Number(order.totalAmount || 0);
-      },
-      0
-    );
-
-    /* =======================================================
-       PREVIOUS DAY SALES
-    ======================================================= */
-
-    const previousSales = previousOrders.reduce(
-      (acc, order) => {
-        return acc + Number(order.totalAmount || 0);
-      },
-      0
-    );
-
-    /* =======================================================
-       PRODUCT COUNT
-       
-       selected date-এ তৈরি হওয়া product
-    ======================================================= */
-
-    const currentItemsCount = await Product.countDocuments({
-      createdAt: {
-        $gte: currentStart,
-        $lte: currentEnd,
-      },
-    });
-
-    /* =======================================================
-       CUSTOMER COUNT
-       
-       selected date-এ তৈরি হওয়া customer
-    ======================================================= */
-
-    const currentCustomersCount = await Customer.countDocuments({
-      createdAt: {
-        $gte: currentStart,
-        $lte: currentEnd,
-      },
-    });
-
-    /* =======================================================
-       PREVIOUS DAY PRODUCT COUNT
-    ======================================================= */
-
-    const previousItemsCount = await Product.countDocuments({
-      createdAt: {
-        $gte: previousStart,
-        $lte: previousEnd,
-      },
-    });
-
-    /* =======================================================
-       PREVIOUS DAY CUSTOMER COUNT
-    ======================================================= */
-
-    const previousCustomersCount = await Customer.countDocuments({
-      createdAt: {
-        $gte: previousStart,
-        $lte: previousEnd,
-      },
-    });
-
-    /* =======================================================
-       SUMMARY CARDS
-       
-       সব selected date অনুযায়ী
-    ======================================================= */
-
-    const summary = [
-      {
-        key: "orders",
-
-        value: currentPeriodOrdersCount,
-
-        growth: calcGrowth(
-          currentPeriodOrdersCount,
-          previousPeriodOrdersCount
-        ),
-      },
-
-      {
-        key: "sales",
-
-        value: currentSales,
-
-        growth: calcGrowth(
-          currentSales,
-          previousSales
-        ),
-      },
-
-      {
-        key: "items",
-
-        value: currentItemsCount,
-
-        growth: calcGrowth(
-          currentItemsCount,
-          previousItemsCount
-        ),
-      },
-
-      {
-        key: "customers",
-
-        value: currentCustomersCount,
-
-        growth: calcGrowth(
-          currentCustomersCount,
-          previousCustomersCount
-        ),
-      },
-    ];
-
-    /* =======================================================
-       ORDER STATUS
-       
-       শুধু selected date-এর orders
-    ======================================================= */
-
-    const statusMap = {};
-
-    currentOrders.forEach((order) => {
-      let status =
-        order.status ||
-        order.orderStatus ||
-        "Pending";
-
-      const value = String(status)
-        .toLowerCase()
-        .trim();
-
-      if (
-        value === "completed" ||
-        value === "complete" ||
-        value === "delivered"
-      ) {
-        status = "Completed";
-      } else if (
-        value === "incomplete" ||
-        value === "cancelled" ||
-        value === "canceled" ||
-        value === "failed"
-      ) {
-        status = "Incomplete";
-      } else {
-        status = "Pending";
-      }
-
-      if (!statusMap[status]) {
-        statusMap[status] = {
-          status,
-          count: 0,
-          total: 0,
-        };
-      }
-
-      statusMap[status].count += 1;
-
-      statusMap[status].total += Number(
-        order.totalAmount || 0
-      );
-    });
-
-    const status = Object.values(statusMap);
-
-    /* =======================================================
-       ORDER AREAS
-       
-       শুধু selected date-এর orders
-    ======================================================= */
-
-    const areaMap = {};
-
-    currentOrders.forEach((order) => {
-      const location =
-        String(
-          order?.selectArea || ""
-        ).trim() || "Unknown";
-
-      if (!areaMap[location]) {
-        areaMap[location] = 0;
-      }
-
-      areaMap[location] += 1;
-    });
-
-    const areas = Object.entries(areaMap)
-      .map(([location, count]) => ({
-        location,
-        count,
-      }))
-      .sort(
-        (a, b) => b.count - a.count
-      );
-
-    /* =======================================================
-       ORDER ACTIVITY
-       
-       শুধু selected date
-    ======================================================= */
-
-    const activity = [
-      {
-        date:
-          date ||
-          currentStart
-            .toISOString()
-            .split("T")[0],
-
-        count: currentOrders.length,
-      },
-    ];
-
-    /* =======================================================
-       STOCK ALERT
-       
-       এটি date based না।
-       কারণ stock বর্তমান অবস্থার data।
-    ======================================================= */
-
-    const stockAlerts =
-      await Product.countDocuments({
-        stock: {
-          $lte: 5,
-        },
-      });
-
-    /* =======================================================
-       NOTIFICATIONS
-       
-       selected date-এর pending orders
-    ======================================================= */
-
-    const pendingOrders =
-      statusMap.Pending?.count || 0;
-
-    const notifications =
-      pendingOrders;
-
-    /* =======================================================
-       TOP SELLING PRODUCTS
-       
-       শুধু selected date-এর orders
-    ======================================================= */
-
-    const topProducts =
-      await MainOrder.aggregate([
-        /* -----------------------------------------------
-           SELECTED DATE FILTER
-        ----------------------------------------------- */
-
-        {
-          $match: {
-            createdAt: {
-              $gte: currentStart,
-              $lte: currentEnd,
-            },
-          },
-        },
-
-        /* -----------------------------------------------
-           PRODUCTS ARRAY খুলবে
-        ----------------------------------------------- */
-
-        {
-          $unwind: "$products",
-        },
-
-        /* -----------------------------------------------
-           PRODUCT অনুযায়ী sold quantity
-        ----------------------------------------------- */
-
+const buildOrderPipeline = (filter) => [
+  { $match: filter },
+
+  {
+    $facet: {
+      summary: [
         {
           $group: {
-            _id: "$products.product",
-
-            sold: {
+            _id: null,
+            orders: { $sum: 1 },
+            sales: {
               $sum: {
-                $ifNull: [
-                  "$products.quantity",
-                  1,
-                ],
+                $convert: {
+                  input: "$totalAmount",
+                  to: "double",
+                  onError: 0,
+                  onNull: 0,
+                },
               },
             },
           },
         },
+      ],
 
-        /* -----------------------------------------------
-           বেশি sold আগে
-        ----------------------------------------------- */
-
+      statuses: [
         {
-          $sort: {
-            sold: -1,
+          $project: {
+            rawStatus: {
+              $toLower: {
+                $trim: {
+                  input: {
+                    $ifNull: [
+                      "$status",
+                      { $ifNull: ["$orderStatus", "Pending"] },
+                    ],
+                  },
+                },
+              },
+            },
+            totalAmount: {
+              $convert: {
+                input: "$totalAmount",
+                to: "double",
+                onError: 0,
+                onNull: 0,
+              },
+            },
           },
         },
-
-        /* -----------------------------------------------
-           TOP 4
-        ----------------------------------------------- */
-
         {
-          $limit: 4,
-        },
-
-        /* -----------------------------------------------
-           Product collection থেকে data
-        ----------------------------------------------- */
-
-        {
-          $lookup: {
-            from: "products",
-
-            localField: "_id",
-
-            foreignField: "_id",
-
-            as: "product",
+          $project: {
+            status: {
+              $switch: {
+                branches: [
+                  {
+                    case: {
+                      $in: [
+                        "$rawStatus",
+                        ["completed", "complete"],
+                      ],
+                    },
+                    then: "Completed",
+                  },
+                  {
+                    case: { $eq: ["$rawStatus", "delivered"] },
+                    then: "Delivered",
+                  },
+                  {
+                    case: {
+                      $in: [
+                        "$rawStatus",
+                        ["incomplete", "failed"],
+                      ],
+                    },
+                    then: "Incomplete",
+                  },
+                  {
+                    case: {
+                      $in: [
+                        "$rawStatus",
+                        ["cancelled", "canceled"],
+                      ],
+                    },
+                    then: "Cancelled",
+                  },
+                  {
+                    case: { $eq: ["$rawStatus", "processing"] },
+                    then: "Processing",
+                  },
+                ],
+                default: "Pending",
+              },
+            },
+            totalAmount: 1,
           },
         },
-
-        /* -----------------------------------------------
-           Product পাওয়া গেলে খুলবে
-        ----------------------------------------------- */
-
         {
-          $unwind: "$product",
+          $group: {
+            _id: "$status",
+            count: { $sum: 1 },
+            total: { $sum: "$totalAmount" },
+          },
         },
-
-        /* -----------------------------------------------
-           Final response
-        ----------------------------------------------- */
-
         {
           $project: {
             _id: 0,
+            status: "$_id",
+            count: 1,
+            total: 1,
+          },
+        },
+      ],
 
+areas: [
+  {
+    $project: {
+      location: {
+        $let: {
+          vars: {
+            trimmedArea: {
+              $trim: {
+                input: {
+                  $ifNull: ["$selectArea", ""],
+                },
+              },
+            },
+          },
+          in: {
+            $cond: [
+              { $eq: ["$$trimmedArea", ""] },
+              "Unknown",
+              "$$trimmedArea",
+            ],
+          },
+        },
+      },
+    },
+  },
+  {
+    $group: {
+      _id: "$location",
+      count: { $sum: 1 },
+    },
+  },
+  {
+    $sort: {
+      count: -1,
+    },
+  },
+  {
+    $project: {
+      _id: 0,
+      location: "$_id",
+      count: 1,
+    },
+  },
+],
+
+      activity: [
+        {
+          $group: {
+            _id: {
+              $dateToString: {
+                format: "%Y-%m-%d",
+                date: "$createdAt",
+                timezone: "Asia/Dhaka",
+              },
+            },
+            count: { $sum: 1 },
+            sales: {
+              $sum: {
+                $convert: {
+                  input: "$totalAmount",
+                  to: "double",
+                  onError: 0,
+                  onNull: 0,
+                },
+              },
+            },
+          },
+        },
+        { $sort: { _id: 1 } },
+        {
+          $project: {
+            _id: 0,
+            date: "$_id",
+            count: 1,
+            orders: "$count",
+            sales: 1,
+          },
+        },
+      ],
+    },
+  },
+];
+
+/* =========================================================
+   DASHBOARD SUMMARY
+   GET /api/dashboard/summary?date=all
+   GET /api/dashboard/summary?date=YYYY-MM-DD
+========================================================= */
+
+export const getDashboardSummary = async (req, res) => {
+  try {
+    const rawDate = req.query.date;
+
+    const allTime =
+      rawDate === undefined ||
+      rawDate === "" ||
+      rawDate === "all";
+
+    const selectedDate = allTime ? getTodayBD() : rawDate;
+
+    if (!allTime && !isValidDate(selectedDate)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid date. Use YYYY-MM-DD or date=all",
+      });
+    }
+
+    const cacheKey = allTime
+      ? "dashboard:all"
+      : `dashboard:${selectedDate}`;
+
+    const cached = getCached(cacheKey);
+
+    if (cached) {
+      res.set("X-Dashboard-Cache", "HIT");
+      return res.status(200).json(cached);
+    }
+
+    const currentRange = getDateRangeBD(selectedDate);
+    const previousDate = getPreviousDateBD(selectedDate);
+    const previousRange = getDateRangeBD(previousDate);
+
+    const currentFilter = allTime
+      ? {}
+      : {
+          createdAt: {
+            $gte: currentRange.start,
+            $lte: currentRange.end,
+          },
+        };
+
+    const previousFilter = {
+      createdAt: {
+        $gte: previousRange.start,
+        $lte: previousRange.end,
+      },
+    };
+
+    // Run independent database work concurrently.
+    const [
+      currentResult,
+      previousResult,
+      currentItemsCount,
+      currentCustomersCount,
+      previousItemsCount,
+      previousCustomersCount,
+      stockAlerts,
+      availableDatesResult,
+      topProducts,
+    ] = await Promise.all([
+      MainOrder.aggregate(buildOrderPipeline(currentFilter)),
+
+      allTime
+        ? Promise.resolve([])
+        : MainOrder.aggregate(buildOrderPipeline(previousFilter)),
+
+      Product.countDocuments(currentFilter),
+
+      Customer.countDocuments(currentFilter),
+
+      allTime
+        ? Promise.resolve(0)
+        : Product.countDocuments(previousFilter),
+
+      allTime
+        ? Promise.resolve(0)
+        : Customer.countDocuments(previousFilter),
+
+      Product.countDocuments({ stock: { $lte: 5 } }),
+
+      // Limit returned dates to keep the response compact.
+      MainOrder.aggregate([
+        {
+          $match: {
+            createdAt: { $exists: true, $ne: null },
+          },
+        },
+        {
+          $group: {
+            _id: {
+              $dateToString: {
+                format: "%Y-%m-%d",
+                date: "$createdAt",
+                timezone: "Asia/Dhaka",
+              },
+            },
+          },
+        },
+        { $sort: { _id: -1 } },
+        { $limit: 365 },
+        {
+          $project: {
+            _id: 0,
+            date: "$_id",
+          },
+        },
+      ]),
+
+      // Aggregate sales quantity, then look up product details.
+      MainOrder.aggregate([
+        ...(allTime ? [] : [{ $match: currentFilter }]),
+        { $unwind: "$products" },
+        {
+          $group: {
+            _id: "$products.product",
+            sold: {
+              $sum: {
+                $ifNull: ["$products.quantity", 1],
+              },
+            },
+          },
+        },
+        { $sort: { sold: -1 } },
+        { $limit: 4 },
+        {
+          $lookup: {
+            from: Product.collection.name,
+            localField: "_id",
+            foreignField: "_id",
+            as: "product",
+          },
+        },
+        { $unwind: "$product" },
+        {
+          $project: {
+            _id: 0,
             id: "$product._id",
-
-            name: "$product.name",
-
+            name: {
+              $ifNull: ["$product.name", "Unnamed Product"],
+            },
             image: {
               $ifNull: [
-                {
-                  $arrayElemAt: [
-                    "$product.images",
-                    0,
-                  ],
-                },
-
+                { $arrayElemAt: ["$product.images", 0] },
                 "/images.png",
               ],
             },
-
             sold: 1,
-
             price: {
               $ifNull: [
                 "$product.discountPrice",
@@ -480,59 +460,108 @@ export const getDashboardSummary = async (req, res) => {
             },
           },
         },
-      ]);
+      ]),
+    ]);
 
-    /* =======================================================
-       STORE
-    ======================================================= */
+    const current = currentResult[0] || {};
+    const previous = previousResult[0] || {};
 
-    const store = {
-      store_name: "Apple Gadgets",
-
-      store_sub: "Admin Dashboard",
+    const currentSummary = current.summary?.[0] || {
+      orders: 0,
+      sales: 0,
     };
 
-    /* =======================================================
-       RESPONSE
-    ======================================================= */
+    const previousSummary = previous.summary?.[0] || {
+      orders: 0,
+      sales: 0,
+    };
 
-    return res.status(200).json({
+    const currentOrdersCount = currentSummary.orders || 0;
+    const currentSales = currentSummary.sales || 0;
+
+    const previousOrdersCount = previousSummary.orders || 0;
+    const previousSales = previousSummary.sales || 0;
+
+    const summary = [
+      {
+        key: "orders",
+        value: currentOrdersCount,
+        growth: allTime
+          ? null
+          : calcGrowth(currentOrdersCount, previousOrdersCount),
+      },
+      {
+        key: "sales",
+        value: currentSales,
+        growth: allTime
+          ? null
+          : calcGrowth(currentSales, previousSales),
+      },
+      {
+        key: "items",
+        value: currentItemsCount,
+        growth: allTime
+          ? null
+          : calcGrowth(currentItemsCount, previousItemsCount),
+      },
+      {
+        key: "customers",
+        value: currentCustomersCount,
+        growth: allTime
+          ? null
+          : calcGrowth(currentCustomersCount, previousCustomersCount),
+      },
+    ];
+
+    const status = current.statuses || [];
+    const areas = current.areas || [];
+
+    const activity = allTime
+      ? current.activity || []
+      : [
+          {
+            date: selectedDate,
+            count: currentOrdersCount,
+            orders: currentOrdersCount,
+            sales: currentSales,
+          },
+        ];
+
+    const notifications =
+      status.find((item) => item.status === "Pending")?.count || 0;
+
+    const response = {
       success: true,
-
-      date:
-        date ||
-        currentStart
-          .toISOString()
-          .split("T")[0],
-
+      mode: allTime ? "all-time" : "selected-date",
+      date: allTime ? null : selectedDate,
       summary,
-
       activity,
-
       topProducts,
-
       status,
-
       areas,
-
+      availableDates: availableDatesResult.map((item) => item.date),
       stockAlerts,
-
       notifications,
+      store: {
+        store_name: "Apple Gadgets",
+        store_sub: "Admin Dashboard",
+      },
+    };
 
-      store,
-    });
+    setCached(cacheKey, response);
+
+    res.set("X-Dashboard-Cache", "MISS");
+    return res.status(200).json(response);
   } catch (error) {
-    console.error(
-      "Dashboard Summary API Error:",
-      error
-    );
+    console.error("Dashboard Summary API Error:", error);
 
     return res.status(500).json({
       success: false,
-
-      message: "Server error",
-
-      error: error.message,
+      message: "Dashboard data could not be loaded.",
+      error:
+        process.env.NODE_ENV === "development"
+          ? error.message
+          : undefined,
     });
   }
 };

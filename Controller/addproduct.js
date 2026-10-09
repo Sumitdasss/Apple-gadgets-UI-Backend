@@ -1,3 +1,4 @@
+
 import mongoose from "mongoose";
 import Product from "../Model/Product.js";
 
@@ -9,2599 +10,553 @@ import {
 } from "../Model/Catagori.js";
 
 /* =========================================================
-   HELPERS
+   CONFIGURATION
+========================================================= */
+
+const CACHE_TTL = 15_000;
+const MAX_CACHE_ITEMS = 200;
+
+const responseCache = new Map();
+
+/* =========================================================
+   CACHE HELPERS
+========================================================= */
+
+const getCached = (key) => {
+  const cached = responseCache.get(key);
+
+  if (!cached) return null;
+
+  if (cached.expiresAt <= Date.now()) {
+    responseCache.delete(key);
+    return null;
+  }
+
+  // Refresh insertion order for simple LRU behavior
+  responseCache.delete(key);
+  responseCache.set(key, cached);
+
+  return cached.data;
+};
+
+const setCached = (key, data) => {
+  if (responseCache.has(key)) {
+    responseCache.delete(key);
+  }
+
+  while (responseCache.size >= MAX_CACHE_ITEMS) {
+    const oldestKey = responseCache.keys().next().value;
+    if (oldestKey === undefined) break;
+    responseCache.delete(oldestKey);
+  }
+
+  responseCache.set(key, {
+    data,
+    expiresAt: Date.now() + CACHE_TTL,
+  });
+};
+
+export const clearProductCache = () => {
+  responseCache.clear();
+};
+
+const sendCachedResponse = (req, res, next) => {
+  if (req.method !== "GET") return next();
+
+  const key = `products:${req.originalUrl}`;
+  const cached = getCached(key);
+
+  if (cached) {
+    res.set("X-Cache", "HIT");
+    return res.status(200).json(cached);
+  }
+
+  const originalJson = res.json.bind(res);
+
+  res.json = (data) => {
+    if (res.statusCode >= 200 && res.statusCode < 300) {
+      setCached(key, data);
+      res.set("X-Cache", "MISS");
+    }
+
+    return originalJson(data);
+  };
+
+  next();
+};
+
+// Use this middleware on product GET routes.
+export const productCache = sendCachedResponse;
+
+/* =========================================================
+   COMMON HELPERS
 ========================================================= */
 
 const parseJSON = (value, fallback = []) => {
-  if (
-    value === undefined ||
-    value === null ||
-    value === ""
-  ) {
+  if (value === undefined || value === null || value === "") {
     return fallback;
   }
 
-  if (typeof value !== "string") {
-    return value;
-  }
+  if (typeof value !== "string") return value;
 
   try {
     return JSON.parse(value);
-  } catch (error) {
-    throw new Error(
-      `Invalid JSON data: ${error.message}`
-    );
+  } catch {
+    throw new Error("Invalid JSON data");
   }
 };
 
-const isValidObjectId = (id) => {
-  return mongoose.Types.ObjectId.isValid(id);
-};
+const isValidObjectId = (id) =>
+  typeof id === "string" && mongoose.Types.ObjectId.isValid(id);
 
-const toBoolean = (value) => {
-  return (
-    value === true ||
-    value === "true" ||
-    value === 1 ||
-    value === "1"
-  );
-};
+const cleanString = (value) =>
+  value === undefined || value === null
+    ? ""
+    : String(value).trim();
 
-const cleanString = (value) => {
-  if (
-    value === undefined ||
-    value === null
-  ) {
-    return "";
-  }
+const toBoolean = (value) =>
+  value === true ||
+  value === "true" ||
+  value === 1 ||
+  value === "1";
 
-  return String(value).trim();
-};
+const uniqueStrings = (items = []) => [
+  ...new Set(
+    items
+      .filter((item) => item !== undefined && item !== null)
+      .map((item) => String(item).trim())
+      .filter(Boolean)
+  ),
+];
 
-const uniqueObjectIds = (ids = []) => {
-  const map = new Map();
+const uniqueIds = (items = []) => [
+  ...new Map(
+    items.filter(Boolean).map((id) => [String(id), id])
+  ).values(),
+];
 
-  for (const id of ids) {
-    if (!id) continue;
+const escapeRegex = (value) =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-    const stringId = String(id);
+const parseArrayFields = (body, fields) => {
+  const result = {};
 
-    if (!map.has(stringId)) {
-      map.set(stringId, id);
+  for (const field of fields) {
+    result[field] = parseJSON(body[field], []);
+
+    if (!Array.isArray(result[field])) {
+      throw new Error(`${field} must be an array`);
     }
   }
 
-  return [...map.values()];
+  return result;
 };
 
-const uniqueStrings = (items = []) => {
-  return [
-    ...new Set(
-      items
-        .filter(
-          (item) =>
-            item !== undefined &&
-            item !== null &&
-            item !== ""
-        )
-        .map((item) =>
-          String(item).trim()
-        )
-        .filter(Boolean)
-    ),
-  ];
+const parseNumber = (value, field, { min = 0, max = Infinity } = {}) => {
+  if (value === undefined || value === null || value === "") {
+    throw new Error(`${field} is required`);
+  }
+
+  const number = Number(value);
+
+  if (!Number.isFinite(number) || number < min || number > max) {
+    throw new Error(`Invalid ${field}`);
+  }
+
+  return number;
+};
+
+const effectivePriceExpression = {
+  $cond: [
+    {
+      $and: [
+        { $ne: ["$discountPrice", null] },
+        { $lt: ["$discountPrice", "$price"] },
+        { $gte: ["$discountPrice", 0] },
+      ],
+    },
+    "$discountPrice",
+    "$price",
+  ],
+};
+
+const sortOptions = {
+  newest: { createdAt: -1 },
+  oldest: { createdAt: 1 },
+  "price-low": { price: 1, _id: 1 },
+  "price-high": { price: -1, _id: -1 },
+  rating: { rating: -1, createdAt: -1 },
 };
 
 /* =========================================================
-   ADD PRODUCT
+   CATEGORY VALIDATION
 ========================================================= */
 
-export const addProduct = async (req, res) => {
-  try {
-    console.log("=================================");
-    console.log("ADD PRODUCT REQUEST");
-    console.log("=================================");
-
-    console.log("BODY:", req.body);
-    console.log("FILES:", req.files);
-
-    const {
-      name,
-      slug,
-      description,
-      shortDescription,
-
-      additionalCategories,
-
-      category,
-      subCategory,
-      childCategory,
-      subChildCategory,
-
-      variants,
-
-      brand,
-
-      price,
-      discountPrice,
-      discountPercentage,
-
-      stock,
-      sku,
-
-      colors,
-      sizes,
-      ram,
-      specifications,
-
-      rating,
-
-      isActive,
-      isFeatured,
-      isNew,
-      isBestSeller,
-
-      metaTitle,
-      metaDescription,
-    } = req.body;
-
-    /* =====================================================
-       REQUIRED
-    ===================================================== */
-
-    const productName = cleanString(name);
-    const productSlug = cleanString(slug);
-
-    if (!productName) {
-      return res.status(400).json({
-        success: false,
-        message: "Product name is required",
-      });
-    }
-
-    if (!productSlug) {
-      return res.status(400).json({
-        success: false,
-        message: "Product slug is required",
-      });
-    }
-
-    if (
-      price === undefined ||
-      price === null ||
-      price === ""
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: "Price is required",
-      });
-    }
-
-    if (
-      stock === undefined ||
-      stock === null ||
-      stock === ""
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: "Stock is required",
-      });
-    }
-
-    /* =====================================================
-       PARSE JSON
-    ===================================================== */
-
-    let parsedColors = [];
-    let parsedSizes = [];
-    let parsedRam = [];
-    let parsedSpecifications = [];
-    let parsedVariants = [];
-    let parsedAdditionalCategories = [];
-
-    try {
-      parsedColors = parseJSON(colors, []);
-      parsedSizes = parseJSON(sizes, []);
-      parsedRam = parseJSON(ram, []);
-      parsedSpecifications =
-        parseJSON(specifications, []);
-      parsedVariants = parseJSON(variants, []);
-
-      parsedAdditionalCategories =
-        parseJSON(
-          additionalCategories,
-          []
-        );
-    } catch (error) {
-      console.error("JSON PARSE ERROR:", error);
-
-      return res.status(400).json({
-        success: false,
-        message: error.message,
-      });
-    }
-
-    /* =====================================================
-       ARRAY VALIDATION
-    ===================================================== */
-
-    if (!Array.isArray(parsedColors)) {
-      return res.status(400).json({
-        success: false,
-        message: "Colors must be an array",
-      });
-    }
-
-    if (!Array.isArray(parsedSizes)) {
-      return res.status(400).json({
-        success: false,
-        message: "Sizes must be an array",
-      });
-    }
-
-    if (!Array.isArray(parsedRam)) {
-      return res.status(400).json({
-        success: false,
-        message: "RAM must be an array",
-      });
-    }
-
-    if (!Array.isArray(parsedSpecifications)) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Specifications must be an array",
-      });
-    }
-
-    if (!Array.isArray(parsedVariants)) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Variants must be an array",
-      });
-    }
-
-    if (!Array.isArray(parsedAdditionalCategories)) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Additional categories must be an array",
-      });
-    }
-
-    /* =====================================================
-       MAIN CATEGORY
-    ===================================================== */
-
-    if (
-      !category ||
-      !isValidObjectId(category)
-    ) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Valid main category is required",
-      });
-    }
-
-    const mainCategory =
-      await MainCategory.findOne({
-        _id: category,
-        isActive: { $ne: false },
-      }).lean();
-
-    if (!mainCategory) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Main category not found or inactive",
-      });
-    }
-
-    /* =====================================================
-       SUB CATEGORY
-    ===================================================== */
-
-    let validatedSubCategory = null;
-
-    if (subCategory) {
-      if (!isValidObjectId(subCategory)) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "Invalid sub category",
-        });
-      }
-
-      validatedSubCategory =
-        await SubCategory.findOne({
-          _id: subCategory,
-          mainCategory: category,
-          isActive: { $ne: false },
-        }).lean();
-
-      if (!validatedSubCategory) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "Sub category does not belong to selected main category",
-        });
-      }
-    }
-
-    /* =====================================================
-       CHILD CATEGORY
-    ===================================================== */
-
-    let validatedChildCategory = null;
-
-    if (childCategory) {
-      if (!isValidObjectId(childCategory)) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "Invalid child category",
-        });
-      }
-
-      if (!subCategory) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "Sub category is required for child category",
-        });
-      }
-
-      validatedChildCategory =
-        await ChildCategory.findOne({
-          _id: childCategory,
-          subCategory: subCategory,
-          mainCategory: category,
-          isActive: { $ne: false },
-        }).lean();
-
-      if (!validatedChildCategory) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "Child category does not belong to selected sub category",
-        });
-      }
-    }
-
-    /* =====================================================
-       SUB CHILD CATEGORY
-    ===================================================== */
-
-    let validatedSubChildCategory = null;
-
-    if (subChildCategory) {
-      if (
-        !isValidObjectId(subChildCategory)
-      ) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "Invalid sub-child category",
-        });
-      }
-
-      if (!childCategory) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "Child category is required for sub-child category",
-        });
-      }
-
-      validatedSubChildCategory =
-        await SubChildCategory.findOne({
-          _id: subChildCategory,
-          childCategory: childCategory,
-          subCategory: subCategory,
-          mainCategory: category,
-          isActive: { $ne: false },
-        }).lean();
-
-      if (!validatedSubChildCategory) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "Sub-child category does not belong to selected child category",
-        });
-      }
-    }
-
-    /* =====================================================
-       ADDITIONAL CATEGORIES
-    ===================================================== */
-
-    const validAdditionalIds =
-      parsedAdditionalCategories.filter(
-        (id) => isValidObjectId(id)
-      );
-
-    const cleanAdditionalCategories =
-      uniqueObjectIds(
-        validAdditionalIds
-      );
-
-    /* =====================================================
-       VARIANTS
-    ===================================================== */
-
-    for (const variant of parsedVariants) {
-      if (
-        !variant ||
-        typeof variant !== "object" ||
-        Array.isArray(variant)
-      ) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "Each variant must be an object",
-        });
-      }
-
-      if (
-        variant.stock !== undefined &&
-        variant.stock !== ""
-      ) {
-        variant.stock = Number(
-          variant.stock
-        );
-
-        if (
-          Number.isNaN(variant.stock) ||
-          variant.stock < 0
-        ) {
-          return res.status(400).json({
-            success: false,
-            message:
-              "Invalid variant stock",
-          });
-        }
-      }
-
-      if (
-        variant.price !== undefined &&
-        variant.price !== ""
-      ) {
-        variant.price = Number(
-          variant.price
-        );
-
-        if (
-          Number.isNaN(variant.price) ||
-          variant.price < 0
-        ) {
-          return res.status(400).json({
-            success: false,
-            message:
-              "Invalid variant price",
-          });
-        }
-      }
-
-      if (
-        variant.ram !== undefined &&
-        variant.ram !== null
-      ) {
-        variant.ram = String(
-          variant.ram
-        ).trim();
-      }
-
-      if (
-        variant.storage !== undefined &&
-        variant.storage !== null
-      ) {
-        variant.storage = String(
-          variant.storage
-        ).trim();
-      }
-
-      if (
-        variant.sku !== undefined &&
-        variant.sku !== null
-      ) {
-        variant.sku = String(
-          variant.sku
-        ).trim();
-      }
-
-      if (
-        variant.color &&
-        typeof variant.color === "object"
-      ) {
-        variant.color = {
-          name: String(
-            variant.color.name || ""
-          ).trim(),
-
-          code:
-            variant.color.code ||
-            "#000000",
-
-          image:
-            variant.color.image ||
-            "",
-        };
-      }
-    }
-
-    /* =====================================================
-       DUPLICATE SLUG
-    ===================================================== */
-
-    const existingProduct =
-      await Product.findOne({
-        slug: productSlug,
-      }).lean();
-
-    if (existingProduct) {
-      return res.status(400).json({
-        success: false,
-        message:
-          `Product with slug "${productSlug}" already exists`,
-      });
-    }
-
-    /* =====================================================
-       IMAGES
-    ===================================================== */
-
-    const productImageFiles =
-      req.files?.images || [];
-
-    const colorImageFiles =
-      req.files?.colorImages || [];
-
-    const uploadedImages =
-      productImageFiles.map(
-        (file) => file.path
-      );
-
-    if (uploadedImages.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "At least one product image is required",
-      });
-    }
-
-    const uploadedColorImages =
-      colorImageFiles.map(
-        (file) => file.path
-      );
-
-    /* =====================================================
-       COLORS
-    ===================================================== */
-
-    const finalColors =
-      parsedColors.map(
-        (color, index) => ({
-          name: cleanString(
-            color?.name
-          ),
-
-          code:
-            color?.code ||
-            "#000000",
-
-          image:
-            uploadedColorImages[index] ||
-            color?.image ||
-            "",
-        })
-      );
-
-    /* =====================================================
-       PRICE
-    ===================================================== */
-
-    const productPrice = Number(price);
-
-    if (
-      Number.isNaN(productPrice) ||
-      productPrice < 0
-    ) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Invalid product price",
-      });
-    }
-
-    /* =====================================================
-       DISCOUNT PRICE
-    ===================================================== */
-
-    const productDiscountPrice =
-      discountPrice !== undefined &&
-      discountPrice !== null &&
-      discountPrice !== ""
-        ? Number(discountPrice)
-        : null;
-
-    if (
-      productDiscountPrice !== null &&
-      (
-        Number.isNaN(
-          productDiscountPrice
-        ) ||
-        productDiscountPrice < 0
-      )
-    ) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Invalid discount price",
-      });
-    }
-
-    if (
-      productDiscountPrice !== null &&
-      productDiscountPrice >=
-        productPrice &&
-      productPrice > 0
-    ) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Discount price must be lower than product price",
-      });
-    }
-
-    /* =====================================================
-       DISCOUNT %
-    ===================================================== */
-
-    let calculatedDiscountPercentage = 0;
-
-    if (
-      productDiscountPrice !== null &&
-      productPrice > 0 &&
-      productDiscountPrice <
-        productPrice
-    ) {
-      calculatedDiscountPercentage =
-        (
-          (
-            productPrice -
-            productDiscountPrice
-          ) /
-          productPrice
-        ) *
-        100;
-    }
-
-    let finalDiscountPercentage =
-      Number(
-        calculatedDiscountPercentage.toFixed(2)
-      );
-
-    if (
-      discountPercentage !== undefined &&
-      discountPercentage !== ""
-    ) {
-      const manuallyEntered =
-        Number(discountPercentage);
-
-      if (
-        Number.isNaN(manuallyEntered) ||
-        manuallyEntered < 0 ||
-        manuallyEntered > 100
-      ) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "Invalid discount percentage",
-        });
-      }
-
-      finalDiscountPercentage =
-        manuallyEntered;
-    }
-
-    /* =====================================================
-       STOCK
-    ===================================================== */
-
-    const productStock = Number(stock);
-
-    if (
-      Number.isNaN(productStock) ||
-      productStock < 0
-    ) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Invalid stock",
-      });
-    }
-
-    /* =====================================================
-       RATING
-    ===================================================== */
-
-    const productRating =
-      rating !== undefined &&
-      rating !== ""
-        ? Number(rating)
-        : 0;
-
-    if (
-      Number.isNaN(productRating) ||
-      productRating < 0 ||
-      productRating > 5
-    ) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Rating must be between 0 and 5",
-      });
-    }
-
-    /* =====================================================
-       CREATE PRODUCT
-    ===================================================== */
-
-    const product =
-      await Product.create({
-        name: productName,
-
-        slug: productSlug,
-
-        description:
-          cleanString(description),
-
-        shortDescription:
-          cleanString(
-            shortDescription
-          ),
-
-        // 4 LEVEL CATEGORY
-
-        category: category,
-
-        subCategory:
-          subCategory || null,
-
-        childCategory:
-          childCategory || null,
-
-        subChildCategory:
-          subChildCategory || null,
-
-        // ADDITIONAL
-
-        additionalCategories:
-          cleanAdditionalCategories,
-
-        // BRAND
-
-        brand:
-          cleanString(brand),
-
-        // PRICE
-
-        price: productPrice,
-
-        discountPrice:
-          productDiscountPrice,
-
-        discountPercentage:
-          finalDiscountPercentage,
-
-        // STOCK
-
-        stock: productStock,
-
-        sku:
-          cleanString(sku),
-
-        // COLORS
-
-        colors: finalColors,
-
-        // SIZES
-
-        sizes: uniqueStrings(
-          parsedSizes
-        ),
-
-        // RAM
-
-        ram: uniqueStrings(
-          parsedRam
-        ),
-
-        // SPECIFICATIONS
-
-        specifications:
-          parsedSpecifications,
-
-        // VARIANTS
-
-        variants: parsedVariants,
-
-        // RATING
-
-        rating: productRating,
-
-        // STATUS
-
-        isActive:
-          isActive === undefined
-            ? true
-            : toBoolean(isActive),
-
-        isFeatured:
-          toBoolean(isFeatured),
-
-        isNew:
-          toBoolean(isNew),
-
-        isBestSeller:
-          toBoolean(isBestSeller),
-
-        // SEO
-
-        metaTitle:
-          cleanString(metaTitle),
-
-        metaDescription:
-          cleanString(
-            metaDescription
-          ),
-
-        // IMAGES
-
-        images: uploadedImages,
-      });
-
-    console.log(
-      "PRODUCT CREATED:",
-      product._id
-    );
-
-    return res.status(201).json({
-      success: true,
-      message:
-        "Product added successfully",
-      product,
-    });
-  } catch (error) {
-    console.error(
-      "================================="
-    );
-
-    console.error(
-      "ADD PRODUCT ERROR"
-    );
-
-    console.error(error);
-
-    console.error(
-      "================================="
-    );
-
-    if (error.code === 11000) {
-      const duplicateField =
-        Object.keys(
-          error.keyPattern || {}
-        )[0] || "field";
-
-      return res.status(400).json({
-        success: false,
-        message:
-          `${duplicateField} already exists`,
-      });
-    }
-
-    if (
-      error.name ===
-      "ValidationError"
-    ) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Product validation failed",
-
-        errors:
-          Object.values(
-            error.errors
-          ).map((err) => ({
-            field: err.path,
-            message: err.message,
-            value: err.value,
-          })),
-      });
-    }
-
-    if (
-      error.name ===
-      "CastError"
-    ) {
-      return res.status(400).json({
-        success: false,
-        message:
-          `Invalid value for ${error.path}`,
-
-        error: error.message,
-      });
-    }
-
-    return res.status(500).json({
-      success: false,
-      message:
-        error.message ||
-        "Failed to add product",
-    });
+const validateCategories = async (body) => {
+  const {
+    category,
+    subCategory,
+    childCategory,
+    subChildCategory,
+  } = body;
+
+  if (!isValidObjectId(category)) {
+    throw new Error("Valid main category is required");
   }
-};
 
-/* =========================================================
-   GET ALL PRODUCTS
-========================================================= */
-
-export const getAllProduct = async (
-  req,
-  res
-) => {
-  try {
-    const {
-      category = "",
-      brand = "",
-      minPrice = "",
-      maxPrice = "",
-      stock = "",
-      sort = "newest",
-    } = req.query;
-
-    /* =====================================================
-       SAFE QUERY VALUES
-    ===================================================== */
-
-    const categoryQuery =
-      typeof category === "string"
-        ? category.trim()
-        : "";
-
-    const brandQuery =
-      typeof brand === "string"
-        ? brand.trim()
-        : "";
-
-    const minPriceQuery =
-      typeof minPrice === "string"
-        ? minPrice.trim()
-        : "";
-
-    const maxPriceQuery =
-      typeof maxPrice === "string"
-        ? maxPrice.trim()
-        : "";
-
-    const stockQuery =
-      typeof stock === "string"
-        ? stock.trim()
-        : "";
-
-    const sortQuery =
-      typeof sort === "string"
-        ? sort.trim()
-        : "newest";
-
-    const filter = {};
-
-    /* =====================================================
-       CATEGORY FILTER
-    ===================================================== */
-
-    if (categoryQuery) {
-      const slug =
-        categoryQuery.toLowerCase();
-
-      let categoryData = null;
-      let categoryLevel = null;
-
-      /* MAIN */
-
-      categoryData =
-        await MainCategory.findOne({
-          slug,
-          isActive: { $ne: false },
-        })
-          .select("_id name slug")
-          .lean();
-
-      if (categoryData) {
-        categoryLevel = "main";
-      }
-
-      /* SUB */
-
-      if (!categoryData) {
-        categoryData =
-          await SubCategory.findOne({
-            slug,
-            isActive: { $ne: false },
-          })
-            .select(
-              "_id name slug mainCategory"
-            )
-            .lean();
-
-        if (categoryData) {
-          categoryLevel = "sub";
-        }
-      }
-
-      /* CHILD */
-
-      if (!categoryData) {
-        categoryData =
-          await ChildCategory.findOne({
-            slug,
-            isActive: { $ne: false },
-          })
-            .select(
-              "_id name slug mainCategory subCategory"
-            )
-            .lean();
-
-        if (categoryData) {
-          categoryLevel = "child";
-        }
-      }
-
-      /* SUB CHILD */
-
-      if (!categoryData) {
-        categoryData =
-          await SubChildCategory.findOne({
-            slug,
-            isActive: { $ne: false },
-          })
-            .select(
-              "_id name slug mainCategory subCategory childCategory"
-            )
-            .lean();
-
-        if (categoryData) {
-          categoryLevel = "subChild";
-        }
-      }
-
-      /* NOT FOUND */
-
-      if (!categoryData) {
-        return res.status(200).json({
-          success: true,
-          count: 0,
-          products: [],
-          category: null,
-
-          filters: {
-            brands: [],
-            series: [],
-            displaySizes: [],
-            storage: [],
-            processors: [],
-            colors: [],
-
-            price: {
-              min: 0,
-              max: 0,
-            },
-          },
-        });
-      }
-
-      /* =================================================
-         CATEGORY IDS
-      ================================================= */
-
-      const categoryIds = [
-        categoryData._id,
-      ];
-
-      /* MAIN */
-
-      if (categoryLevel === "main") {
-        const subCategories =
-          await SubCategory.find({
-            mainCategory:
-              categoryData._id,
-            isActive: {
-              $ne: false,
-            },
-          })
-            .select("_id")
-            .lean();
-
-        categoryIds.push(
-          ...subCategories.map(
-            (item) => item._id
-          )
-        );
-
-        const childCategories =
-          await ChildCategory.find({
-            mainCategory:
-              categoryData._id,
-            isActive: {
-              $ne: false,
-            },
-          })
-            .select("_id")
-            .lean();
-
-        categoryIds.push(
-          ...childCategories.map(
-            (item) => item._id
-          )
-        );
-
-        const subChildCategories =
-          await SubChildCategory.find({
-            mainCategory:
-              categoryData._id,
-            isActive: {
-              $ne: false,
-            },
-          })
-            .select("_id")
-            .lean();
-
-        categoryIds.push(
-          ...subChildCategories.map(
-            (item) => item._id
-          )
-        );
-      }
-
-      /* SUB */
-
-      if (categoryLevel === "sub") {
-        const childCategories =
-          await ChildCategory.find({
-            subCategory:
-              categoryData._id,
-            isActive: {
-              $ne: false,
-            },
-          })
-            .select("_id")
-            .lean();
-
-        categoryIds.push(
-          ...childCategories.map(
-            (item) => item._id
-          )
-        );
-
-        const subChildCategories =
-          await SubChildCategory.find({
-            subCategory:
-              categoryData._id,
-            isActive: {
-              $ne: false,
-            },
-          })
-            .select("_id")
-            .lean();
-
-        categoryIds.push(
-          ...subChildCategories.map(
-            (item) => item._id
-          )
-        );
-      }
-
-      /* CHILD */
-
-      if (categoryLevel === "child") {
-        const subChildCategories =
-          await SubChildCategory.find({
-            childCategory:
-              categoryData._id,
-            isActive: {
-              $ne: false,
-            },
-          })
-            .select("_id")
-            .lean();
-
-        categoryIds.push(
-          ...subChildCategories.map(
-            (item) => item._id
-          )
-        );
-      }
-
-      const uniqueCategoryIds =
-        uniqueObjectIds(
-          categoryIds
-        );
-
-      console.log(
-        "======================================"
-      );
-
-      console.log(
-        "CATEGORY REQUEST:",
-        slug
-      );
-
-      console.log(
-        "CATEGORY NAME:",
-        categoryData.name
-      );
-
-      console.log(
-        "CATEGORY LEVEL:",
-        categoryLevel
-      );
-
-      console.log(
-        "CATEGORY IDS:",
-        uniqueCategoryIds.map(
-          (id) => String(id)
-        )
-      );
-
-      console.log(
-        "======================================"
-      );
-
-      /* =================================================
-         CATEGORY FIELD SPECIFIC FILTER
-      ================================================= */
-
-      if (categoryLevel === "main") {
-        filter.$or = [
-          {
-            category:
-              categoryData._id,
-          },
-          {
-            additionalCategories:
-              categoryData._id,
-          },
-        ];
-      }
-
-      if (categoryLevel === "sub") {
-        filter.$or = [
-          {
-            subCategory:
-              categoryData._id,
-          },
-          {
-            childCategory: {
-              $in: uniqueCategoryIds,
-            },
-          },
-          {
-            subChildCategory: {
-              $in: uniqueCategoryIds,
-            },
-          },
-          {
-            additionalCategories:
-              categoryData._id,
-          },
-        ];
-      }
-
-      if (categoryLevel === "child") {
-        filter.$or = [
-          {
-            childCategory:
-              categoryData._id,
-          },
-          {
-            subChildCategory: {
-              $in: uniqueCategoryIds,
-            },
-          },
-          {
-            additionalCategories:
-              categoryData._id,
-          },
-        ];
-      }
-
-      if (
-        categoryLevel === "subChild"
-      ) {
-        filter.$or = [
-          {
-            subChildCategory:
-              categoryData._id,
-          },
-          {
-            additionalCategories:
-              categoryData._id,
-          },
-        ];
-      }
-    }
-
-    /* =====================================================
-       BRAND
-    ===================================================== */
-
-    if (brandQuery) {
-      const brands =
-        brandQuery
-          .split(",")
-          .map((item) =>
-            item.trim()
-          )
-          .filter(Boolean);
-
-      if (brands.length > 0) {
-        filter.brand = {
-          $in: brands,
-        };
-      }
-    }
-
-    /* =====================================================
-       PRICE
-    ===================================================== */
-
-    if (
-      minPriceQuery ||
-      maxPriceQuery
-    ) {
-      const min =
-        minPriceQuery
-          ? Number(minPriceQuery)
-          : null;
-
-      const max =
-        maxPriceQuery
-          ? Number(maxPriceQuery)
-          : null;
-
-      if (
-        min !== null &&
-        Number.isNaN(min)
-      ) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "Invalid minimum price",
-        });
-      }
-
-      if (
-        max !== null &&
-        Number.isNaN(max)
-      ) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "Invalid maximum price",
-        });
-      }
-
-      const priceConditions = [];
-
-      if (min !== null) {
-        priceConditions.push({
-          $gte: [
-            {
-              $cond: [
-                {
-                  $and: [
-                    {
-                      $ne: [
-                        "$discountPrice",
-                        null,
-                      ],
-                    },
-                    {
-                      $lt: [
-                        "$discountPrice",
-                        "$price",
-                      ],
-                    },
-                  ],
-                },
-                "$discountPrice",
-                "$price",
-              ],
-            },
-            min,
-          ],
-        });
-      }
-
-      if (max !== null) {
-        priceConditions.push({
-          $lte: [
-            {
-              $cond: [
-                {
-                  $and: [
-                    {
-                      $ne: [
-                        "$discountPrice",
-                        null,
-                      ],
-                    },
-                    {
-                      $lt: [
-                        "$discountPrice",
-                        "$price",
-                      ],
-                    },
-                  ],
-                },
-                "$discountPrice",
-                "$price",
-              ],
-            },
-            max,
-          ],
-        });
-      }
-
-      if (priceConditions.length > 0) {
-        filter.$expr = {
-          $and: priceConditions,
-        };
-      }
-    }
-
-    /* =====================================================
-       STOCK
-    ===================================================== */
-
-    if (
-      stockQuery === "in-stock"
-    ) {
-      filter.stock = {
-        $gt: 0,
-      };
-    }
-
-    if (
-      stockQuery === "out-of-stock"
-    ) {
-      filter.stock = {
-        $lte: 0,
-      };
-    }
-
-    /* =====================================================
-       SORT
-    ===================================================== */
-
-    let sortOption = {
-      createdAt: -1,
-    };
-
-    switch (sortQuery) {
-      case "price-low":
-        sortOption = {
-          discountPrice: 1,
-          price: 1,
-        };
-        break;
-
-      case "price-high":
-        sortOption = {
-          discountPrice: -1,
-          price: -1,
-        };
-        break;
-
-      case "rating":
-        sortOption = {
-          rating: -1,
-          createdAt: -1,
-        };
-        break;
-
-      case "oldest":
-        sortOption = {
-          createdAt: 1,
-        };
-        break;
-
-      case "newest":
-      default:
-        sortOption = {
-          createdAt: -1,
-        };
-        break;
-    }
-
-    /* =====================================================
-       GET PRODUCTS
-    ===================================================== */
-
-    const products =
-      await Product.find(filter)
-        .populate({
-          path: "category",
-          model: "MainCategory",
-        })
-        .populate({
-          path: "subCategory",
-          model: "SubCategory",
-        })
-        .populate({
-          path: "childCategory",
-          model: "ChildCategory",
-        })
-        .populate({
-          path: "subChildCategory",
-          model: "SubChildCategory",
-        })
-        .populate({
-          path: "additionalCategories",
-          model: "MainCategory",
-        })
-        .sort(sortOption)
-        .lean();
-
-    /* =====================================================
-       FILTER DATA
-    ===================================================== */
-
-    const brands =
-      uniqueStrings(
-        products.map(
-          (product) =>
-            product.brand
-        )
-      );
-
-    const series =
-      uniqueStrings(
-        products.map(
-          (product) =>
-            product.series
-        )
-      );
-
-    const displaySizes =
-      uniqueStrings(
-        products.map(
-          (product) =>
-            product.displaySize ||
-            product.display ||
-            product.screenSize
-        )
-      );
-
-    /* =====================================================
-       STORAGE
-    ===================================================== */
-
-    const storage =
-      uniqueStrings(
-        products.flatMap(
-          (product) => {
-            if (
-              Array.isArray(
-                product.variants
-              )
-            ) {
-              return product.variants
-                .map(
-                  (variant) =>
-                    variant?.storage
-                )
-                .filter(Boolean);
-            }
-
-            if (
-              Array.isArray(
-                product.storage
-              )
-            ) {
-              return product.storage;
-            }
-
-            return product.storage
-              ? [product.storage]
-              : [];
-          }
-        )
-      );
-
-    /* =====================================================
-       PROCESSORS
-    ===================================================== */
-
-    const processors =
-      uniqueStrings(
-        products.map(
-          (product) =>
-            product.processor
-        )
-      );
-
-    /* =====================================================
-       COLORS
-    ===================================================== */
-
-    const colors =
-      uniqueStrings(
-        products.flatMap(
-          (product) =>
-            Array.isArray(
-              product.colors
-            )
-              ? product.colors
-                  .map(
-                    (color) =>
-                      typeof color ===
-                      "string"
-                        ? color
-                        : color?.name
-                  )
-                  .filter(Boolean)
-              : []
-        )
-      );
-
-    /* =====================================================
-       PRICE RANGE
-    ===================================================== */
-
-    const prices =
-      products
-        .map((product) => {
-          const discount =
-            Number(
-              product.discountPrice
-            );
-
-          const regular =
-            Number(product.price);
-
-          if (
-            Number.isFinite(discount) &&
-            discount > 0 &&
-            discount < regular
-          ) {
-            return discount;
-          }
-
-          return regular;
-        })
-        .filter(
-          (price) =>
-            Number.isFinite(price) &&
-            price > 0
-        );
-
-    const minProductPrice =
-      prices.length > 0
-        ? Math.min(...prices)
-        : 0;
-
-    const maxProductPrice =
-      prices.length > 0
-        ? Math.max(...prices)
-        : 0;
-
-    /* =====================================================
-       SELECTED CATEGORY
-    ===================================================== */
-
-    let selectedCategory = null;
-
-    if (categoryQuery) {
-      const slug =
-        categoryQuery.toLowerCase();
-
-      selectedCategory =
-        await MainCategory.findOne({
-          slug,
-          isActive: {
-            $ne: false,
-          },
-        })
-          .select(
-            "name slug"
-          )
-          .lean();
-
-      if (!selectedCategory) {
-        selectedCategory =
-          await SubCategory.findOne({
-            slug,
-            isActive: {
-              $ne: false,
-            },
-          })
-            .select(
-              "name slug mainCategory"
-            )
-            .lean();
-      }
-
-      if (!selectedCategory) {
-        selectedCategory =
-          await ChildCategory.findOne({
-            slug,
-            isActive: {
-              $ne: false,
-            },
-          })
-            .select(
-              "name slug mainCategory subCategory"
-            )
-            .lean();
-      }
-
-      if (!selectedCategory) {
-        selectedCategory =
-          await SubChildCategory.findOne({
-            slug,
-            isActive: {
-              $ne: false,
-            },
-          })
-            .select(
-              "name slug mainCategory subCategory childCategory"
-            )
-            .lean();
-      }
-    }
-
-    /* =====================================================
-       RESPONSE
-    ===================================================== */
-
-    return res.status(200).json({
-      success: true,
-
-      count:
-        products.length,
-
-      products,
-
-      category:
-        selectedCategory
-          ? {
-              name:
-                selectedCategory.name,
-
-              slug:
-                selectedCategory.slug,
-
-              mainCategory:
-                selectedCategory.mainCategory ||
-                null,
-
-              subCategory:
-                selectedCategory.subCategory ||
-                null,
-
-              childCategory:
-                selectedCategory.childCategory ||
-                null,
-            }
-          : null,
-
-      filters: {
-        brands,
-
-        series,
-
-        displaySizes,
-
-        storage,
-
-        processors,
-
-        colors,
-
-        price: {
-          min:
-            minProductPrice,
-
-          max:
-            maxProductPrice,
-        },
-      },
-    });
-  } catch (error) {
-    console.error(
-      "======================================"
-    );
-
-    console.error(
-      "GET ALL PRODUCT ERROR"
-    );
-
-    console.error(error);
-
-    console.error(
-      "MESSAGE:",
-      error.message
-    );
-
-    console.error(
-      "======================================"
-    );
-
-    return res.status(500).json({
-      success: false,
-
-      message:
-        "Failed to get products",
-
-      error:
-        error.message,
-    });
+  const main = await MainCategory.findOne({
+    _id: category,
+    isActive: { $ne: false },
+  })
+    .select("_id")
+    .lean();
+
+  if (!main) {
+    throw new Error("Main category not found or inactive");
   }
-};
 
-
-
-
-/* =========================================================
-   GET ALL PRODUCTS / SEARCH PRODUCTS
-   GET /products
-   GET /products?search=iphone
-========================================================= */
-
-export const getProducts = async (req, res) => {
-  try {
-    const { search } = req.query;
-
-    let filter = {};
-
-    /* ============================================
-       SEARCH
-    ============================================ */
-
-    if (search && search.trim()) {
-      filter = {
-        $or: [
-          {
-            name: {
-              $regex: search.trim(),
-              $options: "i",
-            },
-          },
-          {
-            slug: {
-              $regex: search.trim(),
-              $options: "i",
-            },
-          },
-          {
-            sku: {
-              $regex: search.trim(),
-              $options: "i",
-            },
-          },
-        ],
-      };
+  if (subCategory) {
+    if (!isValidObjectId(subCategory)) {
+      throw new Error("Invalid sub category");
     }
 
-    /* ============================================
-       GET PRODUCTS
-    ============================================ */
-
-    const products = await Product.find(filter)
-      .sort({ createdAt: -1 })
+    const sub = await SubCategory.findOne({
+      _id: subCategory,
+      mainCategory: category,
+      isActive: { $ne: false },
+    })
+      .select("_id")
       .lean();
 
-    return res.status(200).json({
-      success: true,
-      count: products.length,
-      products,
-    });
-
-  } catch (error) {
-    console.error(
-      "GET PRODUCTS ERROR:",
-      error
-    );
-
-    return res.status(500).json({
-      success: false,
-      message: "Failed to load products",
-      error: error.message,
-    });
+    if (!sub) {
+      throw new Error("Invalid sub category parent");
+    }
   }
+
+  if (childCategory) {
+    if (!subCategory) {
+      throw new Error("Sub category is required for child category");
+    }
+
+    const child = await ChildCategory.findOne({
+      _id: childCategory,
+      subCategory,
+      mainCategory: category,
+      isActive: { $ne: false },
+    })
+      .select("_id")
+      .lean();
+
+    if (!child) {
+      throw new Error("Invalid child category parent");
+    }
+  }
+
+  if (subChildCategory) {
+    if (!childCategory) {
+      throw new Error(
+        "Child category is required for sub-child category"
+      );
+    }
+
+    const subChild = await SubChildCategory.findOne({
+      _id: subChildCategory,
+      childCategory,
+      subCategory,
+      mainCategory: category,
+      isActive: { $ne: false },
+    })
+      .select("_id")
+      .lean();
+
+    if (!subChild) {
+      throw new Error("Invalid sub-child category parent");
+    }
+  }
+
+  return {
+    category,
+    subCategory: subCategory || null,
+    childCategory: childCategory || null,
+    subChildCategory: subChildCategory || null,
+  };
 };
 
-
 /* =========================================================
-   UPDATE PRODUCT
+   VARIANT VALIDATION
 ========================================================= */
 
-export const updateProduct = async (req, res) => {
+const normalizeVariants = (variants) =>
+  variants.map((variant) => {
+    if (
+      !variant ||
+      typeof variant !== "object" ||
+      Array.isArray(variant)
+    ) {
+      throw new Error("Each variant must be an object");
+    }
+
+    const result = { ...variant };
+
+    if (result.stock !== undefined && result.stock !== "") {
+      result.stock = parseNumber(result.stock, "variant stock");
+    }
+
+    if (result.price !== undefined && result.price !== "") {
+      result.price = parseNumber(result.price, "variant price");
+    }
+
+    if (result.ram != null) result.ram = cleanString(result.ram);
+    if (result.storage != null) {
+      result.storage = cleanString(result.storage);
+    }
+    if (result.sku != null) result.sku = cleanString(result.sku);
+
+    if (result.color && typeof result.color === "object") {
+      result.color = {
+        name: cleanString(result.color.name),
+        code: result.color.code || "#000000",
+        image: result.color.image || "",
+      };
+    }
+
+    return result;
+  });
+
+/* =========================================================
+   SHARED PRODUCT SAVE HANDLER
+========================================================= */
+
+const saveProduct = async (req, res, isUpdate = false) => {
   try {
-    console.log("=================================");
-    console.log("UPDATE PRODUCT REQUEST");
-    console.log("=================================");
+    const existingProduct = isUpdate
+      ? await (async () => {
+          const { id } = req.params;
 
-    console.log("PARAMS:", req.params);
-    console.log("BODY:", req.body);
-    console.log("FILES:", req.files);
+          if (!isValidObjectId(id)) {
+            throw new Error("Valid product ID is required");
+          }
 
-    const { id } = req.params;
+          const product = await Product.findById(id);
 
-    /* =====================================================
-       VALIDATE ID
-    ===================================================== */
+          if (!product) {
+            const error = new Error("Product not found");
+            error.statusCode = 404;
+            throw error;
+          }
 
-    if (!id || !isValidObjectId(id)) {
-      return res.status(400).json({
-        success: false,
-        message: "Valid product ID is required",
-      });
+          return product;
+        })()
+      : null;
+
+    const body = req.body;
+
+    const name = cleanString(body.name);
+    const slug = cleanString(body.slug);
+
+    if (!name) throw new Error("Product name is required");
+    if (!slug) throw new Error("Product slug is required");
+
+    const price = parseNumber(body.price, "price");
+
+    const stock = parseNumber(body.stock, "stock");
+
+    const discountPrice =
+      body.discountPrice === undefined ||
+      body.discountPrice === null ||
+      body.discountPrice === ""
+        ? null
+        : parseNumber(body.discountPrice, "discount price");
+
+    if (discountPrice !== null && discountPrice >= price && price > 0) {
+      throw new Error(
+        "Discount price must be lower than product price"
+      );
     }
 
-    const existingProduct = await Product.findById(id);
+    const rating =
+      body.rating === undefined || body.rating === ""
+        ? 0
+        : parseNumber(body.rating, "rating", { min: 0, max: 5 });
 
-    if (!existingProduct) {
-      return res.status(404).json({
-        success: false,
-        message: "Product not found",
-      });
+    const arrays = parseArrayFields(body, [
+      "colors",
+      "sizes",
+      "ram",
+      "specifications",
+      "variants",
+      "additionalCategories",
+    ]);
+
+    const parsedColors = arrays.colors;
+    const parsedSizes = arrays.sizes;
+    const parsedRam = arrays.ram;
+    const parsedSpecifications = arrays.specifications;
+    const parsedVariants = normalizeVariants(arrays.variants);
+
+    const additionalCategories = arrays.additionalCategories;
+
+    if (additionalCategories.some((id) => !isValidObjectId(id))) {
+      throw new Error("Invalid additional category ID");
     }
 
-    const {
-      name,
+    const cleanAdditionalCategories = uniqueIds(additionalCategories);
+
+    const categories = await validateCategories(body);
+
+    const duplicate = await Product.exists({
       slug,
-      description,
-      shortDescription,
+      ...(isUpdate ? { _id: { $ne: existingProduct._id } } : {}),
+    });
 
-      additionalCategories,
-
-      category,
-      subCategory,
-      childCategory,
-      subChildCategory,
-
-      variants,
-
-      brand,
-
-      price,
-      discountPrice,
-      discountPercentage,
-
-      stock,
-      sku,
-
-      colors,
-      sizes,
-      ram,
-      specifications,
-
-      rating,
-
-      isActive,
-      isFeatured,
-      isNew,
-      isBestSeller,
-
-      metaTitle,
-      metaDescription,
-
-      existingImages, // যেগুলো রাখতে চাই
-    } = req.body;
-
-    /* =====================================================
-       REQUIRED
-    ===================================================== */
-
-    const productName = cleanString(name);
-    const productSlug = cleanString(slug);
-
-    if (!productName) {
-      return res.status(400).json({
-        success: false,
-        message: "Product name is required",
-      });
+    if (duplicate) {
+      throw new Error(`Product with slug "${slug}" already exists`);
     }
 
-    if (!productSlug) {
-      return res.status(400).json({
-        success: false,
-        message: "Product slug is required",
-      });
-    }
-
-    if (
-      price === undefined ||
-      price === null ||
-      price === ""
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: "Price is required",
-      });
-    }
-
-    if (
-      stock === undefined ||
-      stock === null ||
-      stock === ""
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: "Stock is required",
-      });
-    }
-
-    /* =====================================================
-       PARSE JSON
-    ===================================================== */
-
-    let parsedColors = [];
-    let parsedSizes = [];
-    let parsedRam = [];
-    let parsedSpecifications = [];
-    let parsedVariants = [];
-    let parsedAdditionalCategories = [];
-    let parsedExistingImages = [];
-
-    try {
-      parsedColors = parseJSON(colors, []);
-      parsedSizes = parseJSON(sizes, []);
-      parsedRam = parseJSON(ram, []);
-      parsedSpecifications = parseJSON(specifications, []);
-      parsedVariants = parseJSON(variants, []);
-      parsedAdditionalCategories = parseJSON(additionalCategories, []);
-      parsedExistingImages = parseJSON(existingImages, []);
-    } catch (error) {
-      console.error("JSON PARSE ERROR:", error);
-
-      return res.status(400).json({
-        success: false,
-        message: error.message,
-      });
-    }
-
-    /* =====================================================
-       ARRAY VALIDATION
-    ===================================================== */
-
-    if (!Array.isArray(parsedColors)) {
-      return res.status(400).json({
-        success: false,
-        message: "Colors must be an array",
-      });
-    }
-
-    if (!Array.isArray(parsedSizes)) {
-      return res.status(400).json({
-        success: false,
-        message: "Sizes must be an array",
-      });
-    }
-
-    if (!Array.isArray(parsedRam)) {
-      return res.status(400).json({
-        success: false,
-        message: "RAM must be an array",
-      });
-    }
-
-    if (!Array.isArray(parsedSpecifications)) {
-      return res.status(400).json({
-        success: false,
-        message: "Specifications must be an array",
-      });
-    }
-
-    if (!Array.isArray(parsedVariants)) {
-      return res.status(400).json({
-        success: false,
-        message: "Variants must be an array",
-      });
-    }
-
-    if (!Array.isArray(parsedAdditionalCategories)) {
-      return res.status(400).json({
-        success: false,
-        message: "Additional categories must be an array",
-      });
-    }
-
-    if (!Array.isArray(parsedExistingImages)) {
-      return res.status(400).json({
-        success: false,
-        message: "Existing images must be an array",
-      });
-    }
-
-    /* =====================================================
-       MAIN CATEGORY
-    ===================================================== */
-
-    if (!category || !isValidObjectId(category)) {
-      return res.status(400).json({
-        success: false,
-        message: "Valid main category is required",
-      });
-    }
-
-    const mainCategory = await MainCategory.findOne({
-      _id: category,
-      isActive: { $ne: false },
-    }).lean();
-
-    if (!mainCategory) {
-      return res.status(400).json({
-        success: false,
-        message: "Main category not found or inactive",
-      });
-    }
-
-    /* =====================================================
-       SUB CATEGORY
-    ===================================================== */
-
-    let validatedSubCategory = null;
-
-    if (subCategory) {
-      if (!isValidObjectId(subCategory)) {
-        return res.status(400).json({
-          success: false,
-          message: "Invalid sub category",
-        });
-      }
-
-      validatedSubCategory = await SubCategory.findOne({
-        _id: subCategory,
-        mainCategory: category,
-        isActive: { $ne: false },
-      }).lean();
-
-      if (!validatedSubCategory) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "Sub category does not belong to selected main category",
-        });
-      }
-    }
-
-    /* =====================================================
-       CHILD CATEGORY
-    ===================================================== */
-
-    let validatedChildCategory = null;
-
-    if (childCategory) {
-      if (!isValidObjectId(childCategory)) {
-        return res.status(400).json({
-          success: false,
-          message: "Invalid child category",
-        });
-      }
-
-      if (!subCategory) {
-        return res.status(400).json({
-          success: false,
-          message: "Sub category is required for child category",
-        });
-      }
-
-      validatedChildCategory = await ChildCategory.findOne({
-        _id: childCategory,
-        subCategory: subCategory,
-        mainCategory: category,
-        isActive: { $ne: false },
-      }).lean();
-
-      if (!validatedChildCategory) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "Child category does not belong to selected sub category",
-        });
-      }
-    }
-
-    /* =====================================================
-       SUB CHILD CATEGORY
-    ===================================================== */
-
-    let validatedSubChildCategory = null;
-
-    if (subChildCategory) {
-      if (!isValidObjectId(subChildCategory)) {
-        return res.status(400).json({
-          success: false,
-          message: "Invalid sub-child category",
-        });
-      }
-
-      if (!childCategory) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "Child category is required for sub-child category",
-        });
-      }
-
-      validatedSubChildCategory = await SubChildCategory.findOne({
-        _id: subChildCategory,
-        childCategory: childCategory,
-        subCategory: subCategory,
-        mainCategory: category,
-        isActive: { $ne: false },
-      }).lean();
-
-      if (!validatedSubChildCategory) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "Sub-child category does not belong to selected child category",
-        });
-      }
-    }
-
-    /* =====================================================
-       ADDITIONAL CATEGORIES
-    ===================================================== */
-
-    const validAdditionalIds = parsedAdditionalCategories.filter(
-      (id) => isValidObjectId(id)
+    const files = req.files || {};
+    const newImages = (files.images || []).map((file) => file.path);
+    const newColorImages = (files.colorImages || []).map(
+      (file) => file.path
     );
 
-    const cleanAdditionalCategories = uniqueObjectIds(validAdditionalIds);
+    const existingImages = isUpdate
+      ? parseJSON(body.existingImages, existingProduct.images || [])
+      : [];
 
-    /* =====================================================
-       VARIANTS
-    ===================================================== */
-
-    for (const variant of parsedVariants) {
-      if (
-        !variant ||
-        typeof variant !== "object" ||
-        Array.isArray(variant)
-      ) {
-        return res.status(400).json({
-          success: false,
-          message: "Each variant must be an object",
-        });
-      }
-
-      if (variant.stock !== undefined && variant.stock !== "") {
-        variant.stock = Number(variant.stock);
-
-        if (Number.isNaN(variant.stock) || variant.stock < 0) {
-          return res.status(400).json({
-            success: false,
-            message: "Invalid variant stock",
-          });
-        }
-      }
-
-      if (variant.price !== undefined && variant.price !== "") {
-        variant.price = Number(variant.price);
-
-        if (Number.isNaN(variant.price) || variant.price < 0) {
-          return res.status(400).json({
-            success: false,
-            message: "Invalid variant price",
-          });
-        }
-      }
-
-      if (variant.ram !== undefined && variant.ram !== null) {
-        variant.ram = String(variant.ram).trim();
-      }
-
-      if (variant.storage !== undefined && variant.storage !== null) {
-        variant.storage = String(variant.storage).trim();
-      }
-
-      if (variant.sku !== undefined && variant.sku !== null) {
-        variant.sku = String(variant.sku).trim();
-      }
-
-      if (variant.color && typeof variant.color === "object") {
-        variant.color = {
-          name: String(variant.color.name || "").trim(),
-          code: variant.color.code || "#000000",
-          image: variant.color.image || "",
-        };
-      }
+    if (!Array.isArray(existingImages)) {
+      throw new Error("Existing images must be an array");
     }
 
-    /* =====================================================
-       DUPLICATE SLUG (except current product)
-    ===================================================== */
+    // Keep only previously stored image URLs belonging to this product.
+    const oldImages = existingProduct?.images || [];
+    const retainedImages = existingImages.filter(
+      (image) => typeof image === "string" && oldImages.includes(image)
+    );
 
-    const slugExists = await Product.findOne({
-      slug: productSlug,
-      _id: { $ne: id },
-    }).lean();
+    const images = isUpdate
+      ? [...retainedImages, ...newImages]
+      : newImages;
 
-    if (slugExists) {
-      return res.status(400).json({
-        success: false,
-        message: `Product with slug "${productSlug}" already exists`,
-      });
+    if (images.length === 0) {
+      throw new Error("At least one product image is required");
     }
 
-    /* =====================================================
-       IMAGES
-    ===================================================== */
-
-    const productImageFiles = req.files?.images || [];
-    const colorImageFiles = req.files?.colorImages || [];
-
-    // নতুন আপলোড করা ইমেজ
-    const newUploadedImages = productImageFiles.map((file) => file.path);
-
-    // পুরনো ইমেজ যেগুলো রাখতে চাই + নতুন ইমেজ
-    const finalImages = [
-      ...parsedExistingImages.filter(Boolean),
-      ...newUploadedImages,
-    ];
-
-    if (finalImages.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: "At least one product image is required",
-      });
-    }
-
-    const uploadedColorImages = colorImageFiles.map((file) => file.path);
-
-    /* =====================================================
-       COLORS
-    ===================================================== */
-
-    // নতুন color image আসলে সেগুলো assign করো
-    // existing color-এর image থাকলে সেটা রাখো
     let colorImageIndex = 0;
 
-    const finalColors = parsedColors.map((color) => {
+    const colors = parsedColors.map((color) => {
       let image = color?.existingImage || color?.image || "";
 
-      // যদি এই color-এর জন্য নতুন image আসে
-      if (color?.imageFile || (!image && uploadedColorImages[colorImageIndex])) {
-        image = uploadedColorImages[colorImageIndex] || image;
-        colorImageIndex++;
-      }
-
-      // যদি color-এ imageFile flag থাকে (frontend থেকে)
-      if (color?.hasNewImage && uploadedColorImages[colorImageIndex]) {
-        image = uploadedColorImages[colorImageIndex];
-        colorImageIndex++;
+      if (
+        color?.hasNewImage ||
+        color?.imageFile ||
+        (!image && newColorImages[colorImageIndex])
+      ) {
+        if (newColorImages[colorImageIndex]) {
+          image = newColorImages[colorImageIndex];
+          colorImageIndex += 1;
+        }
       }
 
       return {
         name: cleanString(color?.name),
         code: color?.code || "#000000",
-        image: image,
+        image,
       };
     });
 
-    /* =====================================================
-       PRICE
-    ===================================================== */
+    const discountPercentage =
+      discountPrice !== null && price > 0
+        ? Number((((price - discountPrice) / price) * 100).toFixed(2))
+        : 0;
 
-    const productPrice = Number(price);
+    const manuallyEnteredDiscount =
+      body.discountPercentage !== undefined &&
+      body.discountPercentage !== ""
+        ? parseNumber(body.discountPercentage, "discount percentage", {
+            min: 0,
+            max: 100,
+          })
+        : discountPercentage;
 
-    if (Number.isNaN(productPrice) || productPrice < 0) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid product price",
-      });
+    const productData = {
+      name,
+      slug,
+      description: cleanString(body.description),
+      shortDescription: cleanString(body.shortDescription),
+
+      ...categories,
+      additionalCategories: cleanAdditionalCategories,
+
+      brand: cleanString(body.brand),
+
+      price,
+      discountPrice,
+      discountPercentage: manuallyEnteredDiscount,
+
+      stock,
+      sku: cleanString(body.sku),
+
+      colors,
+      sizes: uniqueStrings(parsedSizes),
+      ram: uniqueStrings(parsedRam),
+      specifications: parsedSpecifications,
+      variants: parsedVariants,
+
+      rating,
+
+      metaTitle: cleanString(body.metaTitle),
+      metaDescription: cleanString(body.metaDescription),
+
+      images,
+    };
+
+    if (!isUpdate || body.isActive !== undefined) {
+      productData.isActive =
+        body.isActive === undefined ? true : toBoolean(body.isActive);
     }
 
-    /* =====================================================
-       DISCOUNT PRICE
-    ===================================================== */
-
-    const productDiscountPrice =
-      discountPrice !== undefined &&
-      discountPrice !== null &&
-      discountPrice !== ""
-        ? Number(discountPrice)
-        : null;
-
-    if (
-      productDiscountPrice !== null &&
-      (Number.isNaN(productDiscountPrice) || productDiscountPrice < 0)
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid discount price",
-      });
+    if (!isUpdate || body.isFeatured !== undefined) {
+      productData.isFeatured = toBoolean(body.isFeatured);
     }
 
-    if (
-      productDiscountPrice !== null &&
-      productDiscountPrice >= productPrice &&
-      productPrice > 0
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: "Discount price must be lower than product price",
-      });
+    if (!isUpdate || body.isNew !== undefined) {
+      productData.isNew = toBoolean(body.isNew);
     }
 
-    /* =====================================================
-       DISCOUNT %
-    ===================================================== */
-
-    let calculatedDiscountPercentage = 0;
-
-    if (
-      productDiscountPrice !== null &&
-      productPrice > 0 &&
-      productDiscountPrice < productPrice
-    ) {
-      calculatedDiscountPercentage =
-        ((productPrice - productDiscountPrice) / productPrice) * 100;
+    if (!isUpdate || body.isBestSeller !== undefined) {
+      productData.isBestSeller = toBoolean(body.isBestSeller);
     }
 
-    let finalDiscountPercentage = Number(
-      calculatedDiscountPercentage.toFixed(2)
-    );
+    let product;
 
-    if (discountPercentage !== undefined && discountPercentage !== "") {
-      const manuallyEntered = Number(discountPercentage);
-
-      if (
-        Number.isNaN(manuallyEntered) ||
-        manuallyEntered < 0 ||
-        manuallyEntered > 100
-      ) {
-        return res.status(400).json({
-          success: false,
-          message: "Invalid discount percentage",
-        });
-      }
-
-      finalDiscountPercentage = manuallyEntered;
+    if (isUpdate) {
+      existingProduct.set(productData);
+      product = await existingProduct.save();
+    } else {
+      product = await Product.create(productData);
     }
 
-    /* =====================================================
-       STOCK
-    ===================================================== */
+    clearProductCache();
 
-    const productStock = Number(stock);
-
-    if (Number.isNaN(productStock) || productStock < 0) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid stock",
-      });
-    }
-
-    /* =====================================================
-       RATING
-    ===================================================== */
-
-    const productRating =
-      rating !== undefined && rating !== "" ? Number(rating) : 0;
-
-    if (
-      Number.isNaN(productRating) ||
-      productRating < 0 ||
-      productRating > 5
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: "Rating must be between 0 and 5",
-      });
-    }
-
-    /* =====================================================
-       UPDATE PRODUCT
-    ===================================================== */
-
-    existingProduct.name = productName;
-    existingProduct.slug = productSlug;
-    existingProduct.description = cleanString(description);
-    existingProduct.shortDescription = cleanString(shortDescription);
-
-    // 4 LEVEL CATEGORY
-    existingProduct.category = category;
-    existingProduct.subCategory = subCategory || null;
-    existingProduct.childCategory = childCategory || null;
-    existingProduct.subChildCategory = subChildCategory || null;
-
-    // ADDITIONAL
-    existingProduct.additionalCategories = cleanAdditionalCategories;
-
-    // BRAND
-    existingProduct.brand = cleanString(brand);
-
-    // PRICE
-    existingProduct.price = productPrice;
-    existingProduct.discountPrice = productDiscountPrice;
-    existingProduct.discountPercentage = finalDiscountPercentage;
-
-    // STOCK
-    existingProduct.stock = productStock;
-    existingProduct.sku = cleanString(sku);
-
-    // COLORS
-    existingProduct.colors = finalColors;
-
-    // SIZES
-    existingProduct.sizes = uniqueStrings(parsedSizes);
-
-    // RAM
-    existingProduct.ram = uniqueStrings(parsedRam);
-
-    // SPECIFICATIONS
-    existingProduct.specifications = parsedSpecifications;
-
-    // VARIANTS
-    existingProduct.variants = parsedVariants;
-
-    // RATING
-    existingProduct.rating = productRating;
-
-    // STATUS
-    if (isActive !== undefined) {
-      existingProduct.isActive = toBoolean(isActive);
-    }
-
-    if (isFeatured !== undefined) {
-      existingProduct.isFeatured = toBoolean(isFeatured);
-    }
-
-    if (isNew !== undefined) {
-      existingProduct.isNew = toBoolean(isNew);
-    }
-
-    if (isBestSeller !== undefined) {
-      existingProduct.isBestSeller = toBoolean(isBestSeller);
-    }
-
-    // SEO
-    existingProduct.metaTitle = cleanString(metaTitle);
-    existingProduct.metaDescription = cleanString(metaDescription);
-
-    // IMAGES
-    existingProduct.images = finalImages;
-
-    await existingProduct.save();
-
-    console.log("PRODUCT UPDATED:", existingProduct._id);
-
-    return res.status(200).json({
+    return res.status(isUpdate ? 200 : 201).json({
       success: true,
-      message: "Product updated successfully",
-      product: existingProduct,
+      message: isUpdate
+        ? "Product updated successfully"
+        : "Product added successfully",
+      product,
     });
   } catch (error) {
-    console.error("=================================");
-    console.error("UPDATE PRODUCT ERROR");
-    console.error(error);
-    console.error("=================================");
+    console.error(
+      isUpdate ? "UPDATE PRODUCT ERROR:" : "ADD PRODUCT ERROR:",
+      error
+    );
 
     if (error.code === 11000) {
-      const duplicateField =
-        Object.keys(error.keyPattern || {})[0] || "field";
+      const field = Object.keys(error.keyPattern || {})[0] || "field";
 
       return res.status(400).json({
         success: false,
-        message: `${duplicateField} already exists`,
+        message: `${field} already exists`,
       });
     }
 
@@ -2609,10 +564,10 @@ export const updateProduct = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: "Product validation failed",
-        errors: Object.values(error.errors).map((err) => ({
-          field: err.path,
-          message: err.message,
-          value: err.value,
+        errors: Object.values(error.errors).map((item) => ({
+          field: item.path,
+          message: item.message,
+          value: item.value,
         })),
       });
     }
@@ -2621,23 +576,434 @@ export const updateProduct = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: `Invalid value for ${error.path}`,
-        error: error.message,
       });
     }
 
-    return res.status(500).json({
+    return res.status(error.statusCode || 400).json({
       success: false,
-      message: error.message || "Failed to update product",
+      message: error.message || "Product operation failed",
     });
   }
 };
 
+/* =========================================================
+   ADD PRODUCT
+========================================================= */
+
+export const addProduct = (req, res) =>
+  saveProduct(req, res, false);
+
+/* =========================================================
+   UPDATE PRODUCT
+========================================================= */
+
+export const updateProduct = (req, res) =>
+  saveProduct(req, res, true);
+
+/* =========================================================
+   CATEGORY LOOKUP
+========================================================= */
+
+const findCategoryBySlug = async (slug) => {
+  const models = [
+    { model: MainCategory, level: "main" },
+    { model: SubCategory, level: "sub" },
+    { model: ChildCategory, level: "child" },
+    { model: SubChildCategory, level: "subChild" },
+  ];
+
+  for (const item of models) {
+    const category = await item.model
+      .findOne({ slug, isActive: { $ne: false } })
+      .lean();
+
+    if (category) {
+      return { category, level: item.level };
+    }
+  }
+
+  return null;
+};
+
+const getCategoryIds = async (category, level) => {
+  const ids = [category._id];
+
+  if (level === "main") {
+    const [subs, children, subChildren] = await Promise.all([
+      SubCategory.find({
+        mainCategory: category._id,
+        isActive: { $ne: false },
+      }).select("_id").lean(),
+
+      ChildCategory.find({
+        mainCategory: category._id,
+        isActive: { $ne: false },
+      }).select("_id").lean(),
+
+      SubChildCategory.find({
+        mainCategory: category._id,
+        isActive: { $ne: false },
+      }).select("_id").lean(),
+    ]);
+
+    ids.push(
+      ...subs.map((item) => item._id),
+      ...children.map((item) => item._id),
+      ...subChildren.map((item) => item._id)
+    );
+  }
+
+  if (level === "sub") {
+    const [children, subChildren] = await Promise.all([
+      ChildCategory.find({
+        subCategory: category._id,
+        isActive: { $ne: false },
+      }).select("_id").lean(),
+
+      SubChildCategory.find({
+        subCategory: category._id,
+        isActive: { $ne: false },
+      }).select("_id").lean(),
+    ]);
+
+    ids.push(
+      ...children.map((item) => item._id),
+      ...subChildren.map((item) => item._id)
+    );
+  }
+
+  if (level === "child") {
+    const subChildren = await SubChildCategory.find({
+      childCategory: category._id,
+      isActive: { $ne: false },
+    }).select("_id").lean();
+
+    ids.push(...subChildren.map((item) => item._id));
+  }
+
+  return uniqueIds(ids);
+};
+
+/* =========================================================
+   GET ALL PRODUCTS
+   GET /products/getALLproducts?page=1&limit=12
+========================================================= */
+
+export const getAllProduct = async (req, res) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(
+      48,
+      Math.max(1, parseInt(req.query.limit, 10) || 12)
+    );
+    const skip = (page - 1) * limit;
+
+    const categoryQuery = cleanString(req.query.category).toLowerCase();
+    const brandQuery = cleanString(req.query.brand);
+    const stockQuery = cleanString(req.query.stock);
+    const sortQuery = cleanString(req.query.sort) || "newest";
+
+    const filter = {};
+
+    if (categoryQuery) {
+      const found = await findCategoryBySlug(categoryQuery);
+
+      if (!found) {
+        return res.status(200).json({
+          success: true,
+          count: 0,
+          total: 0,
+          page,
+          limit,
+          totalPages: 0,
+          products: [],
+          category: null,
+          filters: {
+            brands: [],
+            series: [],
+            displaySizes: [],
+            storage: [],
+            processors: [],
+            colors: [],
+            price: { min: 0, max: 0 },
+          },
+        });
+      }
+
+      const { category, level } = found;
+      const ids = await getCategoryIds(category, level);
+
+      if (level === "main") {
+        filter.$or = [
+          { category: category._id },
+          { additionalCategories: category._id },
+        ];
+      } else if (level === "sub") {
+        filter.$or = [
+          { subCategory: category._id },
+          { childCategory: { $in: ids } },
+          { subChildCategory: { $in: ids } },
+          { additionalCategories: category._id },
+        ];
+      } else if (level === "child") {
+        filter.$or = [
+          { childCategory: category._id },
+          { subChildCategory: { $in: ids } },
+          { additionalCategories: category._id },
+        ];
+      } else {
+        filter.$or = [
+          { subChildCategory: category._id },
+          { additionalCategories: category._id },
+        ];
+      }
+    }
+
+    if (brandQuery) {
+      filter.brand = {
+        $in: brandQuery.split(",").map((item) => item.trim()).filter(Boolean),
+      };
+    }
+
+    if (req.query.minPrice !== undefined || req.query.maxPrice !== undefined) {
+      const min =
+        req.query.minPrice === undefined ? null : Number(req.query.minPrice);
+
+      const max =
+        req.query.maxPrice === undefined ? null : Number(req.query.maxPrice);
+
+      if (
+        (min !== null && (!Number.isFinite(min) || min < 0)) ||
+        (max !== null && (!Number.isFinite(max) || max < 0)) ||
+        (min !== null && max !== null && min > max)
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid price range",
+        });
+      }
+
+      const conditions = [];
+
+      if (min !== null) {
+        conditions.push({ $gte: [effectivePriceExpression, min] });
+      }
+
+      if (max !== null) {
+        conditions.push({ $lte: [effectivePriceExpression, max] });
+      }
+
+      filter.$expr = { $and: conditions };
+    }
+
+    if (stockQuery === "in-stock") filter.stock = { $gt: 0 };
+    if (stockQuery === "out-of-stock") filter.stock = { $lte: 0 };
+
+    const sortOption = sortOptions[sortQuery] || sortOptions.newest;
+
+    const [products, total, facetRows] = await Promise.all([
+      Product.find(filter)
+        .select("-__v")
+        .populate("category", "name slug")
+        .populate("subCategory", "name slug")
+        .populate("childCategory", "name slug")
+        .populate("subChildCategory", "name slug")
+        .populate("additionalCategories", "name slug")
+        .sort(sortOption)
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+
+      Product.countDocuments(filter),
+
+      // Build filter options from all matching products, not just this page.
+      Product.aggregate([
+        { $match: filter },
+        {
+          $project: {
+            brand: 1,
+            series: 1,
+            displaySize: 1,
+            display: 1,
+            screenSize: 1,
+            processor: 1,
+            colors: 1,
+            variants: 1,
+            storage: 1,
+            price: 1,
+            discountPrice: 1,
+            effectivePrice: effectivePriceExpression,
+          },
+        },
+        {
+          $group: {
+            _id: null,
+            brands: { $addToSet: "$brand" },
+            series: { $addToSet: "$series" },
+            displaySizes: {
+              $addToSet: {
+                $ifNull: [
+                  "$displaySize",
+                  { $ifNull: ["$display", "$screenSize"] },
+                ],
+              },
+            },
+            processors: { $addToSet: "$processor" },
+            colors: { $push: "$colors" },
+            variants: { $push: "$variants" },
+            storageFields: { $push: "$storage" },
+            prices: { $push: "$effectivePrice" },
+          },
+        },
+      ]),
+    ]);
+
+    const facet = facetRows[0] || {};
+
+    const storageValues = [
+      ...(facet.storageFields || []).flatMap((value) =>
+        Array.isArray(value) ? value : value ? [value] : []
+      ),
+      ...(facet.variants || []).flatMap((variants) =>
+        Array.isArray(variants)
+          ? variants.map((variant) => variant?.storage).filter(Boolean)
+          : []
+      ),
+    ];
+
+    const colorValues = (facet.colors || []).flatMap((colors) =>
+      Array.isArray(colors)
+        ? colors.map((color) =>
+            typeof color === "string" ? color : color?.name
+          )
+        : []
+    );
+
+    const validPrices = (facet.prices || []).filter(Number.isFinite);
+
+    const selected = categoryQuery
+      ? await findCategoryBySlug(categoryQuery)
+      : null;
+
+    return res.status(200).json({
+      success: true,
+      count: products.length,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+      products,
+      category: selected
+        ? {
+            name: selected.category.name,
+            slug: selected.category.slug,
+            mainCategory: selected.category.mainCategory || null,
+            subCategory: selected.category.subCategory || null,
+            childCategory: selected.category.childCategory || null,
+          }
+        : null,
+      filters: {
+        brands: uniqueStrings(facet.brands || []),
+        series: uniqueStrings(facet.series || []),
+        displaySizes: uniqueStrings(facet.displaySizes || []),
+        storage: uniqueStrings(storageValues),
+        processors: uniqueStrings(facet.processors || []),
+        colors: uniqueStrings(colorValues),
+        price: {
+          min: validPrices.length ? Math.min(...validPrices) : 0,
+          max: validPrices.length ? Math.max(...validPrices) : 0,
+        },
+      },
+    });
+  } catch (error) {
+    console.error("GET ALL PRODUCT ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to get products",
+    });
+  }
+};
+
+/* =========================================================
+   GET PRODUCTS / SEARCH
+   GET /products?search=iphone&page=1&limit=12
+========================================================= */
+
+export const getProducts = async (req, res) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(
+      48,
+      Math.max(1, parseInt(req.query.limit, 10) || 12)
+    );
+    const skip = (page - 1) * limit;
+
+    const search = cleanString(req.query.search);
+    const filter = {};
+
+    if (search) {
+      const safeSearch = escapeRegex(search);
+
+      filter.$or = [
+        { name: { $regex: safeSearch, $options: "i" } },
+        { slug: { $regex: safeSearch, $options: "i" } },
+        { sku: { $regex: safeSearch, $options: "i" } },
+      ];
+    }
+
+    const [products, total] = await Promise.all([
+      Product.find(filter)
+        .select("-__v")
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+
+      Product.countDocuments(filter),
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      count: products.length,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+      products,
+    });
+  } catch (error) {
+    console.error("GET PRODUCTS ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to load products",
+    });
+  }
+};
+
+/* =========================================================
+   GET PRODUCT BY ID
+========================================================= */
 
 export const getProductById = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const product = await Product.findById(id);
+    if (!isValidObjectId(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid product ID",
+      });
+    }
+
+    const product = await Product.findById(id)
+      .populate("category", "name slug")
+      .populate("subCategory", "name slug")
+      .populate("childCategory", "name slug")
+      .populate("subChildCategory", "name slug")
+      .populate("additionalCategories", "name slug")
+      .lean();
 
     if (!product) {
       return res.status(404).json({
@@ -2651,12 +1017,11 @@ export const getProductById = async (req, res) => {
       product,
     });
   } catch (error) {
-    console.error("Get product by ID error:", error);
+    console.error("GET PRODUCT BY ID ERROR:", error);
 
     return res.status(500).json({
       success: false,
       message: "Failed to get product",
-      error: error.message,
     });
   }
 };

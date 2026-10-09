@@ -8,35 +8,121 @@ import {
   SubChildCategory,
 } from "../Model/Catagori.js";
 
-// ======================================================
-// HELPER: CREATE SLUG
-// ======================================================
+/* ======================================================
+   HELPERS
+====================================================== */
 
-const createSlug = (text) =>
-  text
+const createSlug = (text = "") =>
+  String(text)
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
 
+const isValidObjectId = (id) =>
+  mongoose.Types.ObjectId.isValid(id) &&
+  new mongoose.Types.ObjectId(id).toString() === String(id);
 
-// ======================================================
-// HELPER: VALIDATE OBJECT ID
-// ======================================================
+const idOf = (id) => (id ? id.toString() : "");
 
-const isValidObjectId = (id) => {
-  return mongoose.Types.ObjectId.isValid(id);
+const categorySort = { sortOrder: 1, name: 1 };
+
+const categoryFields =
+  "_id name slug description image sortOrder isActive counts mainCategory subCategory childCategory subCategories childCategories subChildCategories";
+
+const sendError = (res, message, error) => {
+  console.error(message, error);
+
+  return res.status(500).json({
+    success: false,
+    message,
+    error: error.message,
+  });
 };
 
+/* ======================================================
+   CACHE
+   TTL: 30 seconds
+====================================================== */
 
-// ======================================================
-// 1. MAIN CATEGORY
-// ======================================================
+const categoryCache = new Map();
+const CATEGORY_CACHE_TTL = 30_000;
+const MAX_CATEGORY_CACHE_ITEMS = 200;
 
-// ======================================================
-// CREATE MAIN CATEGORY
-// POST /category/main
-// ======================================================
+export const clearCategoryCache = () => {
+  categoryCache.clear();
+};
+
+export const categoryCacheMiddleware = (req, res, next) => {
+  if (req.method !== "GET") return next();
+
+  const key = req.originalUrl;
+  const cached = categoryCache.get(key);
+
+  if (cached && cached.expiresAt > Date.now()) {
+    return res.status(cached.status).json(cached.data);
+  }
+
+  if (cached) categoryCache.delete(key);
+
+  const originalJson = res.json.bind(res);
+
+  res.json = (data) => {
+    if (res.statusCode >= 200 && res.statusCode < 300) {
+      if (categoryCache.size >= MAX_CATEGORY_CACHE_ITEMS) {
+        const oldestKey = categoryCache.keys().next().value;
+        if (oldestKey) categoryCache.delete(oldestKey);
+      }
+
+      categoryCache.set(key, {
+        data,
+        status: res.statusCode,
+        expiresAt: Date.now() + CATEGORY_CACHE_TTL,
+      });
+    }
+
+    return originalJson(data);
+  };
+
+  next();
+};
+
+/* ======================================================
+   SHARED HELPERS
+====================================================== */
+
+const getNameAndSlug = (name, slug) => {
+  const cleanName = String(name || "").trim();
+
+  return {
+    name: cleanName,
+    slug: String(slug || "").trim().toLowerCase() ||
+      createSlug(cleanName),
+  };
+};
+
+const validName = (name) =>
+  typeof name === "string" && name.trim().length > 0;
+
+const safeSortOrder = (value) => {
+  const parsed = Number(value ?? 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const safeIsActive = (value) => {
+  if (value === undefined) return true;
+  if (value === true || value === "true") return true;
+  if (value === false || value === "false") return false;
+  return true;
+};
+
+const checkDuplicateSlug = async (Model, filter) =>
+  Model.findOne(filter).select("_id").lean();
+
+/* ======================================================
+   1. CREATE MAIN CATEGORY
+   POST /category/main
+====================================================== */
 
 export const createMainCategory = async (req, res) => {
   try {
@@ -49,58 +135,42 @@ export const createMainCategory = async (req, res) => {
       isActive = true,
     } = req.body;
 
-    // -----------------------------------------------
-    // Validation
-    // -----------------------------------------------
-
-    if (!name || !name.trim()) {
+    if (!validName(name)) {
       return res.status(400).json({
         success: false,
         message: "Main category name is required",
       });
     }
 
-    // -----------------------------------------------
-    // Create slug
-    // -----------------------------------------------
+    const values = getNameAndSlug(name, slug);
 
-    const categorySlug =
-      slug?.trim().toLowerCase() || createSlug(name);
+    if (!values.slug) {
+      return res.status(400).json({
+        success: false,
+        message: "A valid category slug is required",
+      });
+    }
 
-    // -----------------------------------------------
-    // Check duplicate
-    // -----------------------------------------------
-
-    const existing = await MainCategory.findOne({
-      slug: categorySlug,
+    const existing = await checkDuplicateSlug(MainCategory, {
+      slug: values.slug,
     });
 
     if (existing) {
       return res.status(409).json({
         success: false,
-        message:
-          "Main category with this slug already exists",
+        message: "Main category with this slug already exists",
       });
     }
 
-    // -----------------------------------------------
-    // Create
-    // -----------------------------------------------
-
     const category = await MainCategory.create({
-      name: name.trim(),
-      slug: categorySlug,
+      ...values,
       description,
       image,
-      sortOrder,
-      isActive,
-
-      // Initial references
+      sortOrder: safeSortOrder(sortOrder),
+      isActive: safeIsActive(isActive),
       subCategories: [],
       childCategories: [],
       subChildCategories: [],
-
-      // Initial counts
       counts: {
         subCategories: 0,
         childCategories: 0,
@@ -109,75 +179,43 @@ export const createMainCategory = async (req, res) => {
       },
     });
 
+    clearCategoryCache();
+
     return res.status(201).json({
       success: true,
       message: "Main category created successfully",
       category,
     });
   } catch (error) {
-    console.error(
-      "Create main category error:",
-      error
-    );
-
-    return res.status(500).json({
-      success: false,
-      message: "Failed to create main category",
-      error: error.message,
-    });
+    return sendError(res, "Failed to create main category", error);
   }
 };
 
-
-// ======================================================
-// GET ALL MAIN CATEGORIES
-// ======================================================
+/* ======================================================
+   2. GET MAIN CATEGORIES
+====================================================== */
 
 export const getMainCategories = async (req, res) => {
   try {
-    const categories = await MainCategory.find({
-      isActive: true,
-    })
-      .sort({
-        sortOrder: 1,
-        name: 1,
-      })
+    const categories = await MainCategory.find({ isActive: true })
+      .select(categoryFields)
+      .sort(categorySort)
       .populate({
         path: "subCategories",
-        match: {
-          isActive: true,
-        },
-        options: {
-          sort: {
-            sortOrder: 1,
-            name: 1,
-          },
-        },
+        match: { isActive: true },
+        options: { sort: categorySort },
         populate: {
           path: "childCategories",
-          match: {
-            isActive: true,
-          },
-          options: {
-            sort: {
-              sortOrder: 1,
-              name: 1,
-            },
-          },
+          match: { isActive: true },
+          options: { sort: categorySort },
           populate: {
             path: "subChildCategories",
-            match: {
-              isActive: true,
-            },
-            options: {
-              sort: {
-                sortOrder: 1,
-                name: 1,
-              },
-            },
+            match: { isActive: true },
+            options: { sort: categorySort },
           },
         },
-      });
+      })
+      .lean();
 
     return res.status(200).json({
       success: true,
@@ -185,23 +223,13 @@ export const getMainCategories = async (req, res) => {
       categories,
     });
   } catch (error) {
-    console.error(
-      "Get main categories error:",
-      error
-    );
-
-    return res.status(500).json({
-      success: false,
-      message: "Failed to get main categories",
-      error: error.message,
-    });
+    return sendError(res, "Failed to get main categories", error);
   }
 };
 
-
-// ======================================================
-// GET MAIN CATEGORY BY ID
-// ======================================================
+/* ======================================================
+   3. GET MAIN CATEGORY BY ID
+====================================================== */
 
 export const getMainCategoryById = async (req, res) => {
   try {
@@ -217,22 +245,20 @@ export const getMainCategoryById = async (req, res) => {
     const category = await MainCategory.findById(id)
       .populate({
         path: "subCategories",
-        match: {
-          isActive: true,
-        },
+        match: { isActive: true },
+        options: { sort: categorySort },
         populate: {
           path: "childCategories",
-          match: {
-            isActive: true,
-          },
+          match: { isActive: true },
+          options: { sort: categorySort },
           populate: {
             path: "subChildCategories",
-            match: {
-              isActive: true,
-            },
+            match: { isActive: true },
+            options: { sort: categorySort },
           },
         },
-      });
+      })
+      .lean();
 
     if (!category) {
       return res.status(404).json({
@@ -246,27 +272,13 @@ export const getMainCategoryById = async (req, res) => {
       category,
     });
   } catch (error) {
-    console.error(
-      "Get main category error:",
-      error
-    );
-
-    return res.status(500).json({
-      success: false,
-      message: "Failed to get main category",
-      error: error.message,
-    });
+    return sendError(res, "Failed to get main category", error);
   }
 };
 
-
-// ======================================================
-// 2. SUB CATEGORY
-// ======================================================
-
-// ======================================================
-// CREATE SUB CATEGORY
-// ======================================================
+/* ======================================================
+   4. CREATE SUB CATEGORY
+====================================================== */
 
 export const createSubCategory = async (req, res) => {
   try {
@@ -280,82 +292,54 @@ export const createSubCategory = async (req, res) => {
       isActive = true,
     } = req.body;
 
-    // -----------------------------------------------
-    // Validation
-    // -----------------------------------------------
-
-    if (!name || !name.trim()) {
+    if (!validName(name)) {
       return res.status(400).json({
         success: false,
         message: "Sub category name is required",
       });
     }
 
-    if (
-      !mainCategory ||
-      !isValidObjectId(mainCategory)
-    ) {
+    if (!isValidObjectId(mainCategory)) {
       return res.status(400).json({
         success: false,
-        message:
-          "Valid mainCategory ID is required",
+        message: "Valid mainCategory ID is required",
       });
     }
 
-    // -----------------------------------------------
-    // Find parent
-    // -----------------------------------------------
+    const parent = await MainCategory.findById(mainCategory)
+      .select("_id")
+      .lean();
 
-    const parentMain =
-      await MainCategory.findById(mainCategory);
-
-    if (!parentMain) {
+    if (!parent) {
       return res.status(404).json({
         success: false,
         message: "Main category not found",
       });
     }
 
-    // -----------------------------------------------
-    // Slug
-    // -----------------------------------------------
+    const values = getNameAndSlug(name, slug);
 
-    const categorySlug =
-      slug?.trim().toLowerCase() || createSlug(name);
-
-    // -----------------------------------------------
-    // Duplicate check
-    // -----------------------------------------------
-
-    const existing = await SubCategory.findOne({
+    const existing = await checkDuplicateSlug(SubCategory, {
       mainCategory,
-      slug: categorySlug,
+      slug: values.slug,
     });
 
     if (existing) {
       return res.status(409).json({
         success: false,
-        message:
-          "Sub category with this slug already exists under this Main Category",
+        message: "Sub category with this slug already exists under this Main Category",
       });
     }
 
-    // -----------------------------------------------
-    // CREATE SUB
-    // -----------------------------------------------
-
     const category = await SubCategory.create({
-      name: name.trim(),
-      slug: categorySlug,
+      ...values,
       mainCategory,
       description,
       image,
-      sortOrder,
-      isActive,
-
+      sortOrder: safeSortOrder(sortOrder),
+      isActive: safeIsActive(isActive),
       childCategories: [],
       subChildCategories: [],
-
       counts: {
         childCategories: 0,
         subChildCategories: 0,
@@ -363,26 +347,15 @@ export const createSubCategory = async (req, res) => {
       },
     });
 
-    // -----------------------------------------------
-    // UPDATE MAIN
-    // -----------------------------------------------
-
-    await MainCategory.findByIdAndUpdate(
-      mainCategory,
-      {
-        $addToSet: {
-          subCategories: category._id,
-        },
-
-        $inc: {
-          "counts.subCategories": 1,
-          "counts.total": 1,
-        },
+    await MainCategory.findByIdAndUpdate(mainCategory, {
+      $addToSet: { subCategories: category._id },
+      $inc: {
+        "counts.subCategories": 1,
+        "counts.total": 1,
       },
-      {
-        new: true,
-      }
-    );
+    });
+
+    clearCategoryCache();
 
     return res.status(201).json({
       success: true,
@@ -390,28 +363,15 @@ export const createSubCategory = async (req, res) => {
       category,
     });
   } catch (error) {
-    console.error(
-      "Create sub category error:",
-      error
-    );
-
-    return res.status(500).json({
-      success: false,
-      message: "Failed to create sub category",
-      error: error.message,
-    });
+    return sendError(res, "Failed to create sub category", error);
   }
 };
 
+/* ======================================================
+   5. GET SUB CATEGORIES BY MAIN
+====================================================== */
 
-// ======================================================
-// GET SUB CATEGORIES BY MAIN
-// ======================================================
-
-export const getSubCategoriesByMain = async (
-  req,
-  res
-) => {
+export const getSubCategoriesByMain = async (req, res) => {
   try {
     const { mainCategoryId } = req.params;
 
@@ -426,26 +386,20 @@ export const getSubCategoriesByMain = async (
       mainCategory: mainCategoryId,
       isActive: true,
     })
-      .populate(
-        "mainCategory",
-        "name slug description image"
-      )
+      .select(categoryFields)
+      .sort(categorySort)
+      .populate("mainCategory", "name slug description image")
       .populate({
         path: "childCategories",
-        match: {
-          isActive: true,
-        },
+        match: { isActive: true },
+        options: { sort: categorySort },
         populate: {
           path: "subChildCategories",
-          match: {
-            isActive: true,
-          },
+          match: { isActive: true },
+          options: { sort: categorySort },
         },
       })
-      .sort({
-        sortOrder: 1,
-        name: 1,
-      });
+      .lean();
 
     return res.status(200).json({
       success: true,
@@ -453,27 +407,13 @@ export const getSubCategoriesByMain = async (
       categories,
     });
   } catch (error) {
-    console.error(
-      "Get sub categories error:",
-      error
-    );
-
-    return res.status(500).json({
-      success: false,
-      message: "Failed to get sub categories",
-      error: error.message,
-    });
+    return sendError(res, "Failed to get sub categories", error);
   }
 };
 
-
-// ======================================================
-// 3. CHILD CATEGORY
-// ======================================================
-
-// ======================================================
-// CREATE CHILD CATEGORY
-// ======================================================
+/* ======================================================
+   6. CREATE CHILD CATEGORY
+====================================================== */
 
 export const createChildCategory = async (req, res) => {
   try {
@@ -487,133 +427,80 @@ export const createChildCategory = async (req, res) => {
       isActive = true,
     } = req.body;
 
-    // -----------------------------------------------
-    // Validation
-    // -----------------------------------------------
-
-    if (!name || !name.trim()) {
+    if (!validName(name)) {
       return res.status(400).json({
         success: false,
         message: "Child category name is required",
       });
     }
 
-    if (
-      !subCategory ||
-      !isValidObjectId(subCategory)
-    ) {
+    if (!isValidObjectId(subCategory)) {
       return res.status(400).json({
         success: false,
-        message:
-          "Valid subCategory ID is required",
+        message: "Valid subCategory ID is required",
       });
     }
 
-    // -----------------------------------------------
-    // Find parent Sub
-    // -----------------------------------------------
+    const parent = await SubCategory.findById(subCategory)
+      .select("_id mainCategory")
+      .lean();
 
-    const parentSub =
-      await SubCategory.findById(subCategory);
-
-    if (!parentSub) {
+    if (!parent) {
       return res.status(404).json({
         success: false,
         message: "Sub category not found",
       });
     }
 
-    // -----------------------------------------------
-    // Get Main ID
-    // -----------------------------------------------
+    const mainCategory = parent.mainCategory;
+    const values = getNameAndSlug(name, slug);
 
-    const mainCategory = parentSub.mainCategory;
-
-    // -----------------------------------------------
-    // Slug
-    // -----------------------------------------------
-
-    const categorySlug =
-      slug?.trim().toLowerCase() || createSlug(name);
-
-    // -----------------------------------------------
-    // Duplicate
-    // -----------------------------------------------
-
-    const existing =
-      await ChildCategory.findOne({
-        subCategory,
-        slug: categorySlug,
-      });
+    const existing = await checkDuplicateSlug(ChildCategory, {
+      subCategory,
+      slug: values.slug,
+    });
 
     if (existing) {
       return res.status(409).json({
         success: false,
-        message:
-          "Child category with this slug already exists under this Sub Category",
+        message: "Child category with this slug already exists under this Sub Category",
       });
     }
 
-    // -----------------------------------------------
-    // CREATE CHILD
-    // -----------------------------------------------
-
-    const category =
-      await ChildCategory.create({
-        name: name.trim(),
-        slug: categorySlug,
-
-        subCategory,
-        mainCategory,
-
-        description,
-        image,
-        sortOrder,
-        isActive,
-
-        subChildCategories: [],
-
-        counts: {
-          subChildCategories: 0,
-          total: 0,
-        },
-      });
-
-    // -----------------------------------------------
-    // UPDATE SUB
-    // -----------------------------------------------
-
-    await SubCategory.findByIdAndUpdate(
+    const category = await ChildCategory.create({
+      ...values,
       subCategory,
-      {
-        $addToSet: {
-          childCategories: category._id,
-        },
-
-        $inc: {
-          "counts.childCategories": 1,
-          "counts.total": 1,
-        },
-      }
-    );
-
-    // -----------------------------------------------
-    // UPDATE MAIN
-    // -----------------------------------------------
-
-    await MainCategory.findByIdAndUpdate(
       mainCategory,
-      {
-        $addToSet: {
-          childCategories: category._id,
-        },
+      description,
+      image,
+      sortOrder: safeSortOrder(sortOrder),
+      isActive: safeIsActive(isActive),
+      subChildCategories: [],
+      counts: {
+        subChildCategories: 0,
+        total: 0,
+      },
+    });
 
+    await Promise.all([
+      SubCategory.findByIdAndUpdate(subCategory, {
+        $addToSet: { childCategories: category._id },
         $inc: {
           "counts.childCategories": 1,
           "counts.total": 1,
         },
-      }
-    );
+      }),
+
+      MainCategory.findByIdAndUpdate(mainCategory, {
+        $addToSet: { childCategories: category._id },
+        $inc: {
+          "counts.childCategories": 1,
+          "counts.total": 1,
+        },
+      }),
+    ]);
+
+    clearCategoryCache();
 
     return res.status(201).json({
       success: true,
@@ -621,28 +508,15 @@ export const createChildCategory = async (req, res) => {
       category,
     });
   } catch (error) {
-    console.error(
-      "Create child category error:",
-      error
-    );
-
-    return res.status(500).json({
-      success: false,
-      message: "Failed to create child category",
-      error: error.message,
-    });
+    return sendError(res, "Failed to create child category", error);
   }
 };
 
+/* ======================================================
+   7. GET CHILD CATEGORIES BY SUB
+====================================================== */
 
-// ======================================================
-// GET CHILD BY SUB
-// ======================================================
-
-export const getChildCategoriesBySub = async (
-  req,
-  res
-) => {
+export const getChildCategoriesBySub = async (req, res) => {
   try {
     const { subCategoryId } = req.params;
 
@@ -653,29 +527,20 @@ export const getChildCategoriesBySub = async (
       });
     }
 
-    const categories =
-      await ChildCategory.find({
-        subCategory: subCategoryId,
-        isActive: true,
+    const categories = await ChildCategory.find({
+      subCategory: subCategoryId,
+      isActive: true,
+    })
+      .select(categoryFields)
+      .sort(categorySort)
+      .populate("subCategory", "name slug description image")
+      .populate("mainCategory", "name slug description image")
+      .populate({
+        path: "subChildCategories",
+        match: { isActive: true },
+        options: { sort: categorySort },
       })
-        .populate(
-          "subCategory",
-          "name slug description image"
-        )
-        .populate(
-          "mainCategory",
-          "name slug description image"
-        )
-        .populate({
-          path: "subChildCategories",
-          match: {
-            isActive: true,
-          },
-        })
-        .sort({
-          sortOrder: 1,
-          name: 1,
-        });
+      .lean();
 
     return res.status(200).json({
       success: true,
@@ -683,33 +548,15 @@ export const getChildCategoriesBySub = async (
       categories,
     });
   } catch (error) {
-    console.error(
-      "Get child categories error:",
-      error
-    );
-
-    return res.status(500).json({
-      success: false,
-      message:
-        "Failed to get child categories",
-      error: error.message,
-    });
+    return sendError(res, "Failed to get child categories", error);
   }
 };
 
+/* ======================================================
+   8. CREATE SUB CHILD CATEGORY
+====================================================== */
 
-// ======================================================
-// 4. SUB CHILD CATEGORY
-// ======================================================
-
-// ======================================================
-// CREATE SUB CHILD CATEGORY
-// ======================================================
-
-export const createSubChildCategory = async (
-  req,
-  res
-) => {
+export const createSubChildCategory = async (req, res) => {
   try {
     const {
       name,
@@ -721,181 +568,101 @@ export const createSubChildCategory = async (
       isActive = true,
     } = req.body;
 
-    // -----------------------------------------------
-    // Validation
-    // -----------------------------------------------
-
-    if (!name || !name.trim()) {
+    if (!validName(name)) {
       return res.status(400).json({
         success: false,
-        message:
-          "Sub Child category name is required",
+        message: "Sub Child category name is required",
       });
     }
 
-    if (
-      !childCategory ||
-      !isValidObjectId(childCategory)
-    ) {
+    if (!isValidObjectId(childCategory)) {
       return res.status(400).json({
         success: false,
-        message:
-          "Valid childCategory ID is required",
+        message: "Valid childCategory ID is required",
       });
     }
 
-    // -----------------------------------------------
-    // Find parent Child
-    // -----------------------------------------------
+    const parent = await ChildCategory.findById(childCategory)
+      .select("_id subCategory mainCategory")
+      .lean();
 
-    const parentChild =
-      await ChildCategory.findById(childCategory);
-
-    if (!parentChild) {
+    if (!parent) {
       return res.status(404).json({
         success: false,
         message: "Child category not found",
       });
     }
 
-    // -----------------------------------------------
-    // Parent IDs
-    // -----------------------------------------------
+    const subCategory = parent.subCategory;
+    const mainCategory = parent.mainCategory;
+    const values = getNameAndSlug(name, slug);
 
-    const subCategory =
-      parentChild.subCategory;
-
-    const mainCategory =
-      parentChild.mainCategory;
-
-    // -----------------------------------------------
-    // Slug
-    // -----------------------------------------------
-
-    const categorySlug =
-      slug?.trim().toLowerCase() || createSlug(name);
-
-    // -----------------------------------------------
-    // Duplicate
-    // -----------------------------------------------
-
-    const existing =
-      await SubChildCategory.findOne({
-        childCategory,
-        slug: categorySlug,
-      });
+    const existing = await checkDuplicateSlug(SubChildCategory, {
+      childCategory,
+      slug: values.slug,
+    });
 
     if (existing) {
       return res.status(409).json({
         success: false,
-        message:
-          "Sub Child category with this slug already exists under this Child Category",
+        message: "Sub Child category with this slug already exists under this Child Category",
       });
     }
 
-    // -----------------------------------------------
-    // CREATE SUB CHILD
-    // -----------------------------------------------
-
-    const category =
-      await SubChildCategory.create({
-        name: name.trim(),
-        slug: categorySlug,
-
-        childCategory,
-        subCategory,
-        mainCategory,
-
-        description,
-        image,
-        sortOrder,
-        isActive,
-      });
-
-    // -----------------------------------------------
-    // UPDATE CHILD
-    // -----------------------------------------------
-
-    await ChildCategory.findByIdAndUpdate(
+    const category = await SubChildCategory.create({
+      ...values,
       childCategory,
-      {
-        $addToSet: {
-          subChildCategories: category._id,
-        },
-
-        $inc: {
-          "counts.subChildCategories": 1,
-          "counts.total": 1,
-        },
-      }
-    );
-
-    // -----------------------------------------------
-    // UPDATE SUB
-    // -----------------------------------------------
-
-    await SubCategory.findByIdAndUpdate(
       subCategory,
-      {
-        $addToSet: {
-          subChildCategories: category._id,
-        },
-
-        $inc: {
-          "counts.subChildCategories": 1,
-          "counts.total": 1,
-        },
-      }
-    );
-
-    // -----------------------------------------------
-    // UPDATE MAIN
-    // -----------------------------------------------
-
-    await MainCategory.findByIdAndUpdate(
       mainCategory,
-      {
-        $addToSet: {
-          subChildCategories: category._id,
-        },
+      description,
+      image,
+      sortOrder: safeSortOrder(sortOrder),
+      isActive: safeIsActive(isActive),
+    });
 
+    await Promise.all([
+      ChildCategory.findByIdAndUpdate(childCategory, {
+        $addToSet: { subChildCategories: category._id },
         $inc: {
           "counts.subChildCategories": 1,
           "counts.total": 1,
         },
-      }
-    );
+      }),
+
+      SubCategory.findByIdAndUpdate(subCategory, {
+        $addToSet: { subChildCategories: category._id },
+        $inc: {
+          "counts.subChildCategories": 1,
+          "counts.total": 1,
+        },
+      }),
+
+      MainCategory.findByIdAndUpdate(mainCategory, {
+        $addToSet: { subChildCategories: category._id },
+        $inc: {
+          "counts.subChildCategories": 1,
+          "counts.total": 1,
+        },
+      }),
+    ]);
+
+    clearCategoryCache();
 
     return res.status(201).json({
       success: true,
-      message:
-        "Sub Child category created successfully",
+      message: "Sub Child category created successfully",
       category,
     });
   } catch (error) {
-    console.error(
-      "Create sub child category error:",
-      error
-    );
-
-    return res.status(500).json({
-      success: false,
-      message:
-        "Failed to create sub child category",
-      error: error.message,
-    });
+    return sendError(res, "Failed to create sub child category", error);
   }
 };
 
+/* ======================================================
+   9. GET SUB CHILD CATEGORIES BY CHILD
+====================================================== */
 
-// ======================================================
-// GET SUB CHILD BY CHILD
-// ======================================================
-
-export const getSubChildCategoriesByChild = async (
-  req,
-  res
-) => {
+export const getSubChildCategoriesByChild = async (req, res) => {
   try {
     const { childCategoryId } = req.params;
 
@@ -906,27 +673,16 @@ export const getSubChildCategoriesByChild = async (
       });
     }
 
-    const categories =
-      await SubChildCategory.find({
-        childCategory: childCategoryId,
-        isActive: true,
-      })
-        .populate(
-          "childCategory",
-          "name slug description image"
-        )
-        .populate(
-          "subCategory",
-          "name slug description image"
-        )
-        .populate(
-          "mainCategory",
-          "name slug description image"
-        )
-        .sort({
-          sortOrder: 1,
-          name: 1,
-        });
+    const categories = await SubChildCategory.find({
+      childCategory: childCategoryId,
+      isActive: true,
+    })
+      .select(categoryFields)
+      .sort(categorySort)
+      .populate("childCategory", "name slug description image")
+      .populate("subCategory", "name slug description image")
+      .populate("mainCategory", "name slug description image")
+      .lean();
 
     return res.status(200).json({
       success: true,
@@ -934,30 +690,22 @@ export const getSubChildCategoriesByChild = async (
       categories,
     });
   } catch (error) {
-    console.error(
-      "Get sub child categories error:",
-      error
-    );
-
-    return res.status(500).json({
-      success: false,
-      message:
-        "Failed to get sub child categories",
-      error: error.message,
-    });
+    return sendError(res, "Failed to get sub child categories", error);
   }
 };
 
+/* ======================================================
+   10. FULL CATEGORY TREE
+   Main -> Sub -> Child -> SubChild
 
-// ======================================================
-// 5. FULL CATEGORY TREE
-// Main -> Sub -> Child -> SubChild
-// ======================================================
+   Optimized:
+   - Parallel MongoDB queries
+   - lean()
+   - Select only required fields
+   - Map-based grouping instead of repeated filters
+====================================================== */
 
-export const getFullCategoryTree = async (
-  req,
-  res
-) => {
+export const getFullCategoryTree = async (req, res) => {
   try {
     const [
       mainCategories,
@@ -965,166 +713,121 @@ export const getFullCategoryTree = async (
       childCategories,
       subChildCategories,
     ] = await Promise.all([
-      MainCategory.find({
-        isActive: true,
-      })
-        .sort({
-          sortOrder: 1,
-          name: 1,
-        })
+      MainCategory.find({ isActive: true })
+        .select(categoryFields)
+        .sort(categorySort)
         .lean(),
 
-      SubCategory.find({
-        isActive: true,
-      })
-        .sort({
-          sortOrder: 1,
-          name: 1,
-        })
+      SubCategory.find({ isActive: true })
+        .select(categoryFields)
+        .sort(categorySort)
         .lean(),
 
-      ChildCategory.find({
-        isActive: true,
-      })
-        .sort({
-          sortOrder: 1,
-          name: 1,
-        })
+      ChildCategory.find({ isActive: true })
+        .select(categoryFields)
+        .sort(categorySort)
         .lean(),
 
-      SubChildCategory.find({
-        isActive: true,
-      })
-        .sort({
-          sortOrder: 1,
-          name: 1,
-        })
+      SubChildCategory.find({ isActive: true })
+        .select(categoryFields)
+        .sort(categorySort)
         .lean(),
     ]);
 
-    // ==================================================
-    // BUILD TREE
-    // ==================================================
+    const subsByMain = new Map();
+    const childrenBySub = new Map();
+    const subChildrenByChild = new Map();
+    const subChildrenBySub = new Map();
+    const childrenByMain = new Map();
+    const subChildrenByMain = new Map();
+
+    const addToGroup = (map, parentId, item) => {
+      const key = idOf(parentId);
+      if (!key) return;
+
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(item);
+    };
+
+    for (const sub of subCategories) {
+      addToGroup(subsByMain, sub.mainCategory, sub);
+    }
+
+    for (const child of childCategories) {
+      addToGroup(childrenBySub, child.subCategory, child);
+      addToGroup(childrenByMain, child.mainCategory, child);
+    }
+
+    for (const subChild of subChildCategories) {
+      addToGroup(
+        subChildrenByChild,
+        subChild.childCategory,
+        subChild
+      );
+
+      addToGroup(
+        subChildrenBySub,
+        subChild.subCategory,
+        subChild
+      );
+
+      addToGroup(
+        subChildrenByMain,
+        subChild.mainCategory,
+        subChild
+      );
+    }
 
     const tree = mainCategories.map((main) => {
+      const subs = (subsByMain.get(idOf(main._id)) || []).map(
+        (sub) => {
+          const children = (
+            childrenBySub.get(idOf(sub._id)) || []
+          ).map((child) => {
+            const subChildren =
+              subChildrenByChild.get(idOf(child._id)) || [];
 
-      // -----------------------------------------------
-      // SUBS
-      // -----------------------------------------------
+            return {
+              ...child,
+              subChildCategories: subChildren,
+              counts: {
+                ...(child.counts || {}),
+                subChildCategories: subChildren.length,
+                total: subChildren.length,
+              },
+            };
+          });
 
-      const subs = subCategories
-        .filter(
-          (sub) =>
-            sub.mainCategory &&
-            sub.mainCategory.toString() ===
-              main._id.toString()
-        )
-        .map((sub) => {
-
-          // ---------------------------------------------
-          // CHILDREN
-          // ---------------------------------------------
-
-          const children = childCategories
-            .filter(
-              (child) =>
-                child.subCategory &&
-                child.subCategory.toString() ===
-                  sub._id.toString()
-            )
-            .map((child) => {
-
-              // -----------------------------------------
-              // SUB CHILDREN
-              // -----------------------------------------
-
-              const subChildren =
-                subChildCategories.filter(
-                  (subChild) =>
-                    subChild.childCategory &&
-                    subChild.childCategory.toString() ===
-                      child._id.toString()
-                );
-
-              return {
-                ...child,
-
-                subChildCategories:
-                  subChildren,
-
-                counts: {
-                  subChildCategories:
-                    subChildren.length,
-
-                  total:
-                    subChildren.length,
-                },
-              };
-            });
-
-          // All sub children under this Sub
           const allSubChildren =
-            subChildCategories.filter(
-              (subChild) =>
-                subChild.subCategory &&
-                subChild.subCategory.toString() ===
-                  sub._id.toString()
-            );
+            subChildrenBySub.get(idOf(sub._id)) || [];
 
           return {
             ...sub,
-
-            childCategories:
-              children,
-
+            childCategories: children,
             counts: {
-              childCategories:
-                children.length,
-
-              subChildCategories:
-                allSubChildren.length,
-
-              total:
-                children.length +
-                allSubChildren.length,
+              ...(sub.counts || {}),
+              childCategories: children.length,
+              subChildCategories: allSubChildren.length,
+              total: children.length + allSubChildren.length,
             },
           };
-        });
-
-      // -----------------------------------------------
-      // MAIN DIRECT COUNTS
-      // -----------------------------------------------
+        }
+      );
 
       const mainChildren =
-        childCategories.filter(
-          (child) =>
-            child.mainCategory &&
-            child.mainCategory.toString() ===
-              main._id.toString()
-        );
+        childrenByMain.get(idOf(main._id)) || [];
 
       const mainSubChildren =
-        subChildCategories.filter(
-          (subChild) =>
-            subChild.mainCategory &&
-            subChild.mainCategory.toString() ===
-              main._id.toString()
-        );
+        subChildrenByMain.get(idOf(main._id)) || [];
 
       return {
         ...main,
-
         subCategories: subs,
-
         counts: {
+          ...(main.counts || {}),
           subCategories: subs.length,
-
-          childCategories:
-            mainChildren.length,
-
-          subChildCategories:
-            mainSubChildren.length,
-
+          childCategories: mainChildren.length,
+          subChildCategories: mainSubChildren.length,
           total:
             subs.length +
             mainChildren.length +
@@ -1135,401 +838,236 @@ export const getFullCategoryTree = async (
 
     return res.status(200).json({
       success: true,
-
-      message:
-        "Complete category tree fetched successfully",
-
+      message: "Complete category tree fetched successfully",
       count: tree.length,
-
       categories: tree,
     });
   } catch (error) {
-    console.error(
-      "Get category tree error:",
-      error
-    );
-
-    return res.status(500).json({
-      success: false,
-      message:
-        "Failed to fetch complete category tree",
-      error: error.message,
-    });
+    return sendError(res, "Failed to fetch complete category tree", error);
   }
 };
 
+/* ======================================================
+   11. DELETE SUB CHILD CATEGORY
+====================================================== */
 
-// ======================================================
-// 6. DELETE SUB CHILD CATEGORY
-// ======================================================
-
-export const deleteSubChildCategory = async (
-  req,
-  res
-) => {
+export const deleteSubChildCategory = async (req, res) => {
   try {
     const { id } = req.params;
 
     if (!isValidObjectId(id)) {
       return res.status(400).json({
         success: false,
-        message:
-          "Invalid sub child category ID",
+        message: "Invalid sub child category ID",
       });
     }
 
-    const category =
-      await SubChildCategory.findById(id);
+    const category = await SubChildCategory.findById(id).lean();
 
     if (!category) {
       return res.status(404).json({
         success: false,
-        message:
-          "Sub child category not found",
+        message: "Sub child category not found",
       });
     }
 
-    // -----------------------------------------------
-    // UPDATE CHILD
-    // -----------------------------------------------
-
-    await ChildCategory.findByIdAndUpdate(
-      category.childCategory,
-      {
-        $pull: {
-          subChildCategories: category._id,
-        },
-
+    await Promise.all([
+      ChildCategory.findByIdAndUpdate(category.childCategory, {
+        $pull: { subChildCategories: category._id },
         $inc: {
           "counts.subChildCategories": -1,
           "counts.total": -1,
         },
-      }
-    );
+      }),
 
-    // -----------------------------------------------
-    // UPDATE SUB
-    // -----------------------------------------------
-
-    await SubCategory.findByIdAndUpdate(
-      category.subCategory,
-      {
-        $pull: {
-          subChildCategories: category._id,
-        },
-
+      SubCategory.findByIdAndUpdate(category.subCategory, {
+        $pull: { subChildCategories: category._id },
         $inc: {
           "counts.subChildCategories": -1,
           "counts.total": -1,
         },
-      }
-    );
+      }),
 
-    // -----------------------------------------------
-    // UPDATE MAIN
-    // -----------------------------------------------
-
-    await MainCategory.findByIdAndUpdate(
-      category.mainCategory,
-      {
-        $pull: {
-          subChildCategories: category._id,
-        },
-
+      MainCategory.findByIdAndUpdate(category.mainCategory, {
+        $pull: { subChildCategories: category._id },
         $inc: {
           "counts.subChildCategories": -1,
           "counts.total": -1,
         },
-      }
-    );
+      }),
 
-    // -----------------------------------------------
-    // DELETE
-    // -----------------------------------------------
+      SubChildCategory.findByIdAndDelete(id),
+    ]);
 
-    await SubChildCategory.findByIdAndDelete(id);
+    clearCategoryCache();
 
     return res.status(200).json({
       success: true,
-      message:
-        "Sub child category deleted successfully",
+      message: "Sub child category deleted successfully",
     });
   } catch (error) {
-    console.error(
-      "Delete sub child category error:",
-      error
-    );
-
-    return res.status(500).json({
-      success: false,
-      message:
-        "Failed to delete sub child category",
-      error: error.message,
-    });
+    return sendError(res, "Failed to delete sub child category", error);
   }
 };
 
+/* ======================================================
+   12. DELETE CHILD CATEGORY
+====================================================== */
 
-// ======================================================
-// 7. DELETE CHILD CATEGORY
-// ======================================================
-
-export const deleteChildCategory = async (
-  req,
-  res
-) => {
+export const deleteChildCategory = async (req, res) => {
   try {
     const { id } = req.params;
 
     if (!isValidObjectId(id)) {
       return res.status(400).json({
         success: false,
-        message:
-          "Invalid child category ID",
+        message: "Invalid child category ID",
       });
     }
 
-    const category =
-      await ChildCategory.findById(id);
+    const category = await ChildCategory.findById(id).lean();
 
     if (!category) {
       return res.status(404).json({
         success: false,
-        message:
-          "Child category not found",
+        message: "Child category not found",
       });
     }
 
-    // -----------------------------------------------
-    // SAFETY CHECK
-    // -----------------------------------------------
-
-    const subChildCount =
-      await SubChildCategory.countDocuments({
-        childCategory: id,
-      });
+    const subChildCount = await SubChildCategory.countDocuments({
+      childCategory: id,
+    });
 
     if (subChildCount > 0) {
       return res.status(400).json({
         success: false,
-        message:
-          "Cannot delete Child Category because it contains Sub Child Categories",
+        message: "Cannot delete Child Category because it contains Sub Child Categories",
       });
     }
 
-    // -----------------------------------------------
-    // UPDATE SUB
-    // -----------------------------------------------
-
-    await SubCategory.findByIdAndUpdate(
-      category.subCategory,
-      {
-        $pull: {
-          childCategories: category._id,
-        },
-
+    await Promise.all([
+      SubCategory.findByIdAndUpdate(category.subCategory, {
+        $pull: { childCategories: category._id },
         $inc: {
           "counts.childCategories": -1,
           "counts.total": -1,
         },
-      }
-    );
+      }),
 
-    // -----------------------------------------------
-    // UPDATE MAIN
-    // -----------------------------------------------
-
-    await MainCategory.findByIdAndUpdate(
-      category.mainCategory,
-      {
-        $pull: {
-          childCategories: category._id,
-        },
-
+      MainCategory.findByIdAndUpdate(category.mainCategory, {
+        $pull: { childCategories: category._id },
         $inc: {
           "counts.childCategories": -1,
           "counts.total": -1,
         },
-      }
-    );
+      }),
 
-    // -----------------------------------------------
-    // DELETE
-    // -----------------------------------------------
+      ChildCategory.findByIdAndDelete(id),
+    ]);
 
-    await ChildCategory.findByIdAndDelete(id);
+    clearCategoryCache();
 
     return res.status(200).json({
       success: true,
-      message:
-        "Child category deleted successfully",
+      message: "Child category deleted successfully",
     });
   } catch (error) {
-    console.error(
-      "Delete child category error:",
-      error
-    );
-
-    return res.status(500).json({
-      success: false,
-      message:
-        "Failed to delete child category",
-      error: error.message,
-    });
+    return sendError(res, "Failed to delete child category", error);
   }
 };
 
+/* ======================================================
+   13. DELETE SUB CATEGORY
+====================================================== */
 
-// ======================================================
-// 8. DELETE SUB CATEGORY
-// ======================================================
-
-export const deleteSubCategory = async (
-  req,
-  res
-) => {
+export const deleteSubCategory = async (req, res) => {
   try {
     const { id } = req.params;
 
     if (!isValidObjectId(id)) {
       return res.status(400).json({
         success: false,
-        message:
-          "Invalid sub category ID",
+        message: "Invalid sub category ID",
       });
     }
 
-    const category =
-      await SubCategory.findById(id);
+    const category = await SubCategory.findById(id).lean();
 
     if (!category) {
       return res.status(404).json({
         success: false,
-        message:
-          "Sub category not found",
+        message: "Sub category not found",
       });
     }
 
-    // -----------------------------------------------
-    // SAFETY CHECK
-    // -----------------------------------------------
-
-    const childCount =
-      await ChildCategory.countDocuments({
-        subCategory: id,
-      });
+    const childCount = await ChildCategory.countDocuments({
+      subCategory: id,
+    });
 
     if (childCount > 0) {
       return res.status(400).json({
         success: false,
-        message:
-          "Cannot delete Sub Category because it contains Child Categories",
+        message: "Cannot delete Sub Category because it contains Child Categories",
       });
     }
 
-    // -----------------------------------------------
-    // UPDATE MAIN
-    // -----------------------------------------------
-
-    await MainCategory.findByIdAndUpdate(
-      category.mainCategory,
-      {
-        $pull: {
-          subCategories: category._id,
-        },
-
+    await Promise.all([
+      MainCategory.findByIdAndUpdate(category.mainCategory, {
+        $pull: { subCategories: category._id },
         $inc: {
           "counts.subCategories": -1,
           "counts.total": -1,
         },
-      }
-    );
+      }),
 
-    // -----------------------------------------------
-    // DELETE
-    // -----------------------------------------------
+      SubCategory.findByIdAndDelete(id),
+    ]);
 
-    await SubCategory.findByIdAndDelete(id);
+    clearCategoryCache();
 
     return res.status(200).json({
       success: true,
-      message:
-        "Sub category deleted successfully",
+      message: "Sub category deleted successfully",
     });
   } catch (error) {
-    console.error(
-      "Delete sub category error:",
-      error
-    );
-
-    return res.status(500).json({
-      success: false,
-      message:
-        "Failed to delete sub category",
-      error: error.message,
-    });
+    return sendError(res, "Failed to delete sub category", error);
   }
 };
 
+/* ======================================================
+   14. DELETE MAIN CATEGORY
+====================================================== */
 
-// ======================================================
-// 9. DELETE MAIN CATEGORY
-// ======================================================
-
-export const deleteMainCategory = async (
-  req,
-  res
-) => {
+export const deleteMainCategory = async (req, res) => {
   try {
     const { id } = req.params;
 
     if (!isValidObjectId(id)) {
       return res.status(400).json({
         success: false,
-        message:
-          "Invalid main category ID",
+        message: "Invalid main category ID",
       });
     }
 
-    const category =
-      await MainCategory.findById(id);
+    const category = await MainCategory.findById(id).lean();
 
     if (!category) {
       return res.status(404).json({
         success: false,
-        message:
-          "Main category not found",
+        message: "Main category not found",
       });
     }
 
-    // -----------------------------------------------
-    // SAFETY CHECK
-    // -----------------------------------------------
+    const [subCount, childCount, subChildCount] = await Promise.all([
+      SubCategory.countDocuments({ mainCategory: id }),
+      ChildCategory.countDocuments({ mainCategory: id }),
+      SubChildCategory.countDocuments({ mainCategory: id }),
+    ]);
 
-    const subCount =
-      await SubCategory.countDocuments({
-        mainCategory: id,
-      });
-
-    const childCount =
-      await ChildCategory.countDocuments({
-        mainCategory: id,
-      });
-
-    const subChildCount =
-      await SubChildCategory.countDocuments({
-        mainCategory: id,
-      });
-
-    if (
-      subCount > 0 ||
-      childCount > 0 ||
-      subChildCount > 0
-    ) {
+    if (subCount > 0 || childCount > 0 || subChildCount > 0) {
       return res.status(400).json({
         success: false,
-        message:
-          "Cannot delete Main Category because it contains child categories",
+        message: "Cannot delete Main Category because it contains child categories",
         counts: {
           subCategories: subCount,
           childCategories: childCount,
@@ -1540,24 +1078,13 @@ export const deleteMainCategory = async (
 
     await MainCategory.findByIdAndDelete(id);
 
+    clearCategoryCache();
+
     return res.status(200).json({
       success: true,
-      message:
-        "Main category deleted successfully",
+      message: "Main category deleted successfully",
     });
   } catch (error) {
-    console.error(
-      "Delete main category error:",
-      error
-    );
-
-    return res.status(500).json({
-      success: false,
-      message:
-        "Failed to delete main category",
-      error: error.message,
-    });
+    return sendError(res, "Failed to delete main category", error);
   }
 };
-
-

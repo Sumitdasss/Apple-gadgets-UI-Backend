@@ -26,6 +26,8 @@ const customerSchema = new mongoose.Schema({
     trim: true,
   },
 });
+
+customerSchema.index({ createdAt: -1 });
  const Customer =
   mongoose.models.Customer ||
   mongoose.model("Customer", customerSchema);

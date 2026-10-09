@@ -293,7 +293,7 @@ const orderSchema = new mongoose.Schema(
     timestamps: true,
   }
 );
-
+orderSchema.index({ createdAt: -1 });
 const MainOrder =
   mongoose.models.MainOrder ||
   mongoose.model("MainOrder", orderSchema);

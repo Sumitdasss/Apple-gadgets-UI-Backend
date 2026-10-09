@@ -1,10 +1,10 @@
+
 import MainOrder from "../Model/MainOrder.js";
 import Product from "../Model/Product.js";
 import Customer from "../Model/Customer.js";
 
 /* =========================================================
-   SHORT CACHE
-   Same dashboard request can reuse data for 15 seconds.
+   DASHBOARD CACHE
 ========================================================= */
 
 const dashboardCache = new Map();
@@ -25,9 +25,23 @@ const getCached = (key) => {
 };
 
 const setCached = (key, data) => {
-  if (dashboardCache.size >= MAX_CACHE_ITEMS) {
-    const firstKey = dashboardCache.keys().next().value;
-    if (firstKey) dashboardCache.delete(firstKey);
+  // Remove expired entries first.
+  for (const [cacheKey, item] of dashboardCache) {
+    if (Date.now() >= item.expiresAt) {
+      dashboardCache.delete(cacheKey);
+    }
+  }
+
+  // Keep the cache size limited.
+  if (
+    dashboardCache.size >= MAX_CACHE_ITEMS &&
+    !dashboardCache.has(key)
+  ) {
+    const oldestKey = dashboardCache.keys().next().value;
+
+    if (oldestKey !== undefined) {
+      dashboardCache.delete(oldestKey);
+    }
   }
 
   dashboardCache.set(key, {
@@ -36,7 +50,7 @@ const setCached = (key, data) => {
   });
 };
 
-// Call this after creating, updating, or deleting orders/products.
+// Call after creating, updating, or deleting orders/products/customers.
 export const clearDashboardCache = () => {
   dashboardCache.clear();
 };
@@ -53,11 +67,6 @@ const getTodayBD = () =>
     day: "2-digit",
   }).format(new Date());
 
-const getDateRangeBD = (date) => ({
-  start: new Date(`${date}T00:00:00+06:00`),
-  end: new Date(`${date}T23:59:59.999+06:00`),
-});
-
 const isValidDate = (date) => {
   if (
     typeof date !== "string" ||
@@ -67,25 +76,46 @@ const isValidDate = (date) => {
   }
 
   const [year, month, day] = date.split("-").map(Number);
-  const parsed = new Date(`${date}T00:00:00+06:00`);
+
+  // Validate calendar date without timezone conversion issues.
+  const parsed = new Date(Date.UTC(year, month - 1, day));
 
   return (
-    !Number.isNaN(parsed.getTime()) &&
     parsed.getUTCFullYear() === year &&
-    parsed.getUTCMonth() + 1 === month &&
+    parsed.getUTCMonth() === month - 1 &&
     parsed.getUTCDate() === day
   );
 };
 
-const getPreviousDateBD = (date) => {
-  const { start } = getDateRangeBD(date);
+const getDateRangeBD = (date) => {
+  const [year, month, day] = date.split("-").map(Number);
 
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Dhaka",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(new Date(start.getTime() - 1));
+  // Bangladesh is UTC+6.
+  const start = new Date(
+    Date.UTC(year, month - 1, day) - 6 * 60 * 60 * 1000
+  );
+
+  const end = new Date(
+    Date.UTC(year, month - 1, day + 1) -
+      6 * 60 * 60 * 1000 -
+      1
+  );
+
+  return { start, end };
+};
+
+const getPreviousDateBD = (date) => {
+  const [year, month, day] = date.split("-").map(Number);
+
+  const previous = new Date(
+    Date.UTC(year, month - 1, day - 1)
+  );
+
+  const y = previous.getUTCFullYear();
+  const m = String(previous.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(previous.getUTCDate()).padStart(2, "0");
+
+  return `${y}-${m}-${d}`;
 };
 
 const calcGrowth = (current, previous) => {
@@ -93,13 +123,13 @@ const calcGrowth = (current, previous) => {
     return current > 0 ? "+100.0%" : "+0.0%";
   }
 
-  const diff = ((current - previous) / previous) * 100;
+  const diff = ((current - previous) / Math.abs(previous)) * 100;
 
   return `${diff >= 0 ? "+" : ""}${diff.toFixed(1)}%`;
 };
 
 /* =========================================================
-   ORDER AGGREGATION
+   ORDER AGGREGATION PIPELINE
 ========================================================= */
 
 const buildOrderPipeline = (filter) => [
@@ -141,6 +171,7 @@ const buildOrderPipeline = (filter) => [
                 },
               },
             },
+
             totalAmount: {
               $convert: {
                 input: "$totalAmount",
@@ -151,6 +182,7 @@ const buildOrderPipeline = (filter) => [
             },
           },
         },
+
         {
           $project: {
             status: {
@@ -158,10 +190,7 @@ const buildOrderPipeline = (filter) => [
                 branches: [
                   {
                     case: {
-                      $in: [
-                        "$rawStatus",
-                        ["completed", "complete"],
-                      ],
+                      $in: ["$rawStatus", ["completed", "complete"]],
                     },
                     then: "Completed",
                   },
@@ -171,19 +200,13 @@ const buildOrderPipeline = (filter) => [
                   },
                   {
                     case: {
-                      $in: [
-                        "$rawStatus",
-                        ["incomplete", "failed"],
-                      ],
+                      $in: ["$rawStatus", ["incomplete", "failed"]],
                     },
                     then: "Incomplete",
                   },
                   {
                     case: {
-                      $in: [
-                        "$rawStatus",
-                        ["cancelled", "canceled"],
-                      ],
+                      $in: ["$rawStatus", ["cancelled", "canceled"]],
                     },
                     then: "Cancelled",
                   },
@@ -198,6 +221,7 @@ const buildOrderPipeline = (filter) => [
             totalAmount: 1,
           },
         },
+
         {
           $group: {
             _id: "$status",
@@ -205,6 +229,7 @@ const buildOrderPipeline = (filter) => [
             total: { $sum: "$totalAmount" },
           },
         },
+
         {
           $project: {
             _id: 0,
@@ -215,50 +240,49 @@ const buildOrderPipeline = (filter) => [
         },
       ],
 
-areas: [
-  {
-    $project: {
-      location: {
-        $let: {
-          vars: {
-            trimmedArea: {
-              $trim: {
-                input: {
-                  $ifNull: ["$selectArea", ""],
+      areas: [
+        {
+          $project: {
+            location: {
+              $let: {
+                vars: {
+                  trimmedArea: {
+                    $trim: {
+                      input: {
+                        $ifNull: ["$selectArea", ""],
+                      },
+                    },
+                  },
+                },
+                in: {
+                  $cond: [
+                    { $eq: ["$$trimmedArea", ""] },
+                    "Unknown",
+                    "$$trimmedArea",
+                  ],
                 },
               },
             },
           },
-          in: {
-            $cond: [
-              { $eq: ["$$trimmedArea", ""] },
-              "Unknown",
-              "$$trimmedArea",
-            ],
+        },
+
+        {
+          $group: {
+            _id: "$location",
+            count: { $sum: 1 },
           },
         },
-      },
-    },
-  },
-  {
-    $group: {
-      _id: "$location",
-      count: { $sum: 1 },
-    },
-  },
-  {
-    $sort: {
-      count: -1,
-    },
-  },
-  {
-    $project: {
-      _id: 0,
-      location: "$_id",
-      count: 1,
-    },
-  },
-],
+
+        { $sort: { count: -1 } },
+
+        {
+          $project: {
+            _id: 0,
+            location: "$_id",
+            count: 1,
+          },
+        },
+      ],
 
       activity: [
         {
@@ -283,7 +307,9 @@ areas: [
             },
           },
         },
+
         { $sort: { _id: 1 } },
+
         {
           $project: {
             _id: 0,
@@ -308,6 +334,7 @@ export const getDashboardSummary = async (req, res) => {
   try {
     const rawDate = req.query.date;
 
+    // No date, empty date, or date=all means all-time data.
     const allTime =
       rawDate === undefined ||
       rawDate === "" ||
@@ -315,10 +342,12 @@ export const getDashboardSummary = async (req, res) => {
 
     const selectedDate = allTime ? getTodayBD() : rawDate;
 
+    // Validate before querying MongoDB.
     if (!allTime && !isValidDate(selectedDate)) {
       return res.status(400).json({
         success: false,
         message: "Invalid date. Use YYYY-MM-DD or date=all",
+        receivedDate: selectedDate,
       });
     }
 
@@ -353,7 +382,6 @@ export const getDashboardSummary = async (req, res) => {
       },
     };
 
-    // Run independent database work concurrently.
     const [
       currentResult,
       previousResult,
@@ -371,6 +399,7 @@ export const getDashboardSummary = async (req, res) => {
         ? Promise.resolve([])
         : MainOrder.aggregate(buildOrderPipeline(previousFilter)),
 
+      // Preserve the original behavior: products/customers filtered by createdAt.
       Product.countDocuments(currentFilter),
 
       Customer.countDocuments(currentFilter),
@@ -383,9 +412,10 @@ export const getDashboardSummary = async (req, res) => {
         ? Promise.resolve(0)
         : Customer.countDocuments(previousFilter),
 
-      Product.countDocuments({ stock: { $lte: 5 } }),
+      Product.countDocuments({
+        stock: { $lte: 5 },
+      }),
 
-      // Limit returned dates to keep the response compact.
       MainOrder.aggregate([
         {
           $match: {
@@ -413,10 +443,11 @@ export const getDashboardSummary = async (req, res) => {
         },
       ]),
 
-      // Aggregate sales quantity, then look up product details.
       MainOrder.aggregate([
         ...(allTime ? [] : [{ $match: currentFilter }]),
+
         { $unwind: "$products" },
+
         {
           $group: {
             _id: "$products.product",
@@ -427,8 +458,10 @@ export const getDashboardSummary = async (req, res) => {
             },
           },
         },
+
         { $sort: { sold: -1 } },
         { $limit: 4 },
+
         {
           $lookup: {
             from: Product.collection.name,
@@ -437,7 +470,9 @@ export const getDashboardSummary = async (req, res) => {
             as: "product",
           },
         },
+
         { $unwind: "$product" },
+
         {
           $project: {
             _id: 0,
@@ -565,3 +600,4 @@ export const getDashboardSummary = async (req, res) => {
     });
   }
 };
+

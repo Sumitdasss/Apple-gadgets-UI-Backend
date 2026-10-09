@@ -109,7 +109,7 @@ const mainCategorySchema = new mongoose.Schema(
     toObject: {
       virtuals: true,
     },
-  }
+  },
 );
 
 // =====================================================
@@ -133,7 +133,6 @@ mainCategorySchema.virtual("subChildCategoryDetails", {
   localField: "_id",
   foreignField: "mainCategory",
 });
-
 
 // =====================================================
 // 2. SUB CATEGORY SCHEMA
@@ -236,7 +235,7 @@ const subCategorySchema = new mongoose.Schema(
     toObject: {
       virtuals: true,
     },
-  }
+  },
 );
 
 // Virtual
@@ -251,7 +250,6 @@ subCategorySchema.virtual("subChildCategoryDetails", {
   localField: "_id",
   foreignField: "subCategory",
 });
-
 
 // =====================================================
 // 3. CHILD CATEGORY SCHEMA
@@ -345,7 +343,7 @@ const childCategorySchema = new mongoose.Schema(
     toObject: {
       virtuals: true,
     },
-  }
+  },
 );
 
 // Virtual
@@ -354,7 +352,6 @@ childCategorySchema.virtual("subChildCategoryDetails", {
   localField: "_id",
   foreignField: "childCategory",
 });
-
 
 // =====================================================
 // 4. SUB CHILD CATEGORY SCHEMA
@@ -424,9 +421,8 @@ const subChildCategorySchema = new mongoose.Schema(
     toObject: {
       virtuals: true,
     },
-  }
+  },
 );
-
 
 // =====================================================
 // EXPORT MODELS

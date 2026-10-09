@@ -193,21 +193,13 @@ const orderSchema = new mongoose.Schema(
     // =========================
     paymentMethod: {
       type: String,
-      enum: [
-        "cash_on_delivery",
-        "online_payment",
-        "partial_payment",
-      ],
+      enum: ["cash_on_delivery", "online_payment", "partial_payment"],
       default: "cash_on_delivery",
     },
 
     paymentStatus: {
       type: String,
-      enum: [
-        "unpaid",
-        "partially_paid",
-        "paid",
-      ],
+      enum: ["unpaid", "partially_paid", "paid"],
       default: "unpaid",
     },
 
@@ -216,10 +208,7 @@ const orderSchema = new mongoose.Schema(
     // =========================
     deliveryMethod: {
       type: String,
-      enum: [
-        "courier_service",
-        "shop_pickup",
-      ],
+      enum: ["courier_service", "shop_pickup"],
       default: "courier_service",
     },
 
@@ -291,11 +280,10 @@ const orderSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-  }
+  },
 );
 orderSchema.index({ createdAt: -1 });
 const MainOrder =
-  mongoose.models.MainOrder ||
-  mongoose.model("MainOrder", orderSchema);
+  mongoose.models.MainOrder || mongoose.model("MainOrder", orderSchema);
 
 export default MainOrder;

@@ -1,4 +1,3 @@
-
 import mongoose from "mongoose";
 
 import {
@@ -96,13 +95,14 @@ const getNameAndSlug = (name, slug) => {
 
   return {
     name: cleanName,
-    slug: String(slug || "").trim().toLowerCase() ||
-      createSlug(cleanName),
+    slug:
+      String(slug || "")
+        .trim()
+        .toLowerCase() || createSlug(cleanName),
   };
 };
 
-const validName = (name) =>
-  typeof name === "string" && name.trim().length > 0;
+const validName = (name) => typeof name === "string" && name.trim().length > 0;
 
 const safeSortOrder = (value) => {
   const parsed = Number(value ?? 0);
@@ -327,7 +327,8 @@ export const createSubCategory = async (req, res) => {
     if (existing) {
       return res.status(409).json({
         success: false,
-        message: "Sub category with this slug already exists under this Main Category",
+        message:
+          "Sub category with this slug already exists under this Main Category",
       });
     }
 
@@ -463,7 +464,8 @@ export const createChildCategory = async (req, res) => {
     if (existing) {
       return res.status(409).json({
         success: false,
-        message: "Child category with this slug already exists under this Sub Category",
+        message:
+          "Child category with this slug already exists under this Sub Category",
       });
     }
 
@@ -605,7 +607,8 @@ export const createSubChildCategory = async (req, res) => {
     if (existing) {
       return res.status(409).json({
         success: false,
-        message: "Sub Child category with this slug already exists under this Child Category",
+        message:
+          "Sub Child category with this slug already exists under this Child Category",
       });
     }
 
@@ -707,32 +710,28 @@ export const getSubChildCategoriesByChild = async (req, res) => {
 
 export const getFullCategoryTree = async (req, res) => {
   try {
-    const [
-      mainCategories,
-      subCategories,
-      childCategories,
-      subChildCategories,
-    ] = await Promise.all([
-      MainCategory.find({ isActive: true })
-        .select(categoryFields)
-        .sort(categorySort)
-        .lean(),
+    const [mainCategories, subCategories, childCategories, subChildCategories] =
+      await Promise.all([
+        MainCategory.find({ isActive: true })
+          .select(categoryFields)
+          .sort(categorySort)
+          .lean(),
 
-      SubCategory.find({ isActive: true })
-        .select(categoryFields)
-        .sort(categorySort)
-        .lean(),
+        SubCategory.find({ isActive: true })
+          .select(categoryFields)
+          .sort(categorySort)
+          .lean(),
 
-      ChildCategory.find({ isActive: true })
-        .select(categoryFields)
-        .sort(categorySort)
-        .lean(),
+        ChildCategory.find({ isActive: true })
+          .select(categoryFields)
+          .sort(categorySort)
+          .lean(),
 
-      SubChildCategory.find({ isActive: true })
-        .select(categoryFields)
-        .sort(categorySort)
-        .lean(),
-    ]);
+        SubChildCategory.find({ isActive: true })
+          .select(categoryFields)
+          .sort(categorySort)
+          .lean(),
+      ]);
 
     const subsByMain = new Map();
     const childrenBySub = new Map();
@@ -759,33 +758,18 @@ export const getFullCategoryTree = async (req, res) => {
     }
 
     for (const subChild of subChildCategories) {
-      addToGroup(
-        subChildrenByChild,
-        subChild.childCategory,
-        subChild
-      );
+      addToGroup(subChildrenByChild, subChild.childCategory, subChild);
 
-      addToGroup(
-        subChildrenBySub,
-        subChild.subCategory,
-        subChild
-      );
+      addToGroup(subChildrenBySub, subChild.subCategory, subChild);
 
-      addToGroup(
-        subChildrenByMain,
-        subChild.mainCategory,
-        subChild
-      );
+      addToGroup(subChildrenByMain, subChild.mainCategory, subChild);
     }
 
     const tree = mainCategories.map((main) => {
-      const subs = (subsByMain.get(idOf(main._id)) || []).map(
-        (sub) => {
-          const children = (
-            childrenBySub.get(idOf(sub._id)) || []
-          ).map((child) => {
-            const subChildren =
-              subChildrenByChild.get(idOf(child._id)) || [];
+      const subs = (subsByMain.get(idOf(main._id)) || []).map((sub) => {
+        const children = (childrenBySub.get(idOf(sub._id)) || []).map(
+          (child) => {
+            const subChildren = subChildrenByChild.get(idOf(child._id)) || [];
 
             return {
               ...child,
@@ -796,29 +780,26 @@ export const getFullCategoryTree = async (req, res) => {
                 total: subChildren.length,
               },
             };
-          });
+          },
+        );
 
-          const allSubChildren =
-            subChildrenBySub.get(idOf(sub._id)) || [];
+        const allSubChildren = subChildrenBySub.get(idOf(sub._id)) || [];
 
-          return {
-            ...sub,
-            childCategories: children,
-            counts: {
-              ...(sub.counts || {}),
-              childCategories: children.length,
-              subChildCategories: allSubChildren.length,
-              total: children.length + allSubChildren.length,
-            },
-          };
-        }
-      );
+        return {
+          ...sub,
+          childCategories: children,
+          counts: {
+            ...(sub.counts || {}),
+            childCategories: children.length,
+            subChildCategories: allSubChildren.length,
+            total: children.length + allSubChildren.length,
+          },
+        };
+      });
 
-      const mainChildren =
-        childrenByMain.get(idOf(main._id)) || [];
+      const mainChildren = childrenByMain.get(idOf(main._id)) || [];
 
-      const mainSubChildren =
-        subChildrenByMain.get(idOf(main._id)) || [];
+      const mainSubChildren = subChildrenByMain.get(idOf(main._id)) || [];
 
       return {
         ...main,
@@ -828,10 +809,7 @@ export const getFullCategoryTree = async (req, res) => {
           subCategories: subs.length,
           childCategories: mainChildren.length,
           subChildCategories: mainSubChildren.length,
-          total:
-            subs.length +
-            mainChildren.length +
-            mainSubChildren.length,
+          total: subs.length + mainChildren.length + mainSubChildren.length,
         },
       };
     });
@@ -941,7 +919,8 @@ export const deleteChildCategory = async (req, res) => {
     if (subChildCount > 0) {
       return res.status(400).json({
         success: false,
-        message: "Cannot delete Child Category because it contains Sub Child Categories",
+        message:
+          "Cannot delete Child Category because it contains Sub Child Categories",
       });
     }
 
@@ -1007,7 +986,8 @@ export const deleteSubCategory = async (req, res) => {
     if (childCount > 0) {
       return res.status(400).json({
         success: false,
-        message: "Cannot delete Sub Category because it contains Child Categories",
+        message:
+          "Cannot delete Sub Category because it contains Child Categories",
       });
     }
 
@@ -1067,7 +1047,8 @@ export const deleteMainCategory = async (req, res) => {
     if (subCount > 0 || childCount > 0 || subChildCount > 0) {
       return res.status(400).json({
         success: false,
-        message: "Cannot delete Main Category because it contains child categories",
+        message:
+          "Cannot delete Main Category because it contains child categories",
         counts: {
           subCategories: subCount,
           childCategories: childCount,

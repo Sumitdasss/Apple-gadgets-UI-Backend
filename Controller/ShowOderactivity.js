@@ -1,8 +1,7 @@
 import MainOrder from "../Model/MainOrder.js";
 
-
-export const OderActivity =async (req,res)=> {
-try {
+export const OderActivity = async (req, res) => {
+  try {
     const activityData = await MainOrder.aggregate([
       {
         $group: {
@@ -37,6 +36,4 @@ try {
       error: error.message,
     });
   }
-
-
-    }
+};

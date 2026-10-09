@@ -1,4 +1,3 @@
-
 import MainOrder from "../Model/MainOrder.js";
 import Product from "../Model/Product.js";
 import Customer from "../Model/Customer.js";
@@ -33,10 +32,7 @@ const setCached = (key, data) => {
   }
 
   // Keep the cache size limited.
-  if (
-    dashboardCache.size >= MAX_CACHE_ITEMS &&
-    !dashboardCache.has(key)
-  ) {
+  if (dashboardCache.size >= MAX_CACHE_ITEMS && !dashboardCache.has(key)) {
     const oldestKey = dashboardCache.keys().next().value;
 
     if (oldestKey !== undefined) {
@@ -68,10 +64,7 @@ const getTodayBD = () =>
   }).format(new Date());
 
 const isValidDate = (date) => {
-  if (
-    typeof date !== "string" ||
-    !/^\d{4}-\d{2}-\d{2}$/.test(date)
-  ) {
+  if (typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
     return false;
   }
 
@@ -91,14 +84,10 @@ const getDateRangeBD = (date) => {
   const [year, month, day] = date.split("-").map(Number);
 
   // Bangladesh is UTC+6.
-  const start = new Date(
-    Date.UTC(year, month - 1, day) - 6 * 60 * 60 * 1000
-  );
+  const start = new Date(Date.UTC(year, month - 1, day) - 6 * 60 * 60 * 1000);
 
   const end = new Date(
-    Date.UTC(year, month - 1, day + 1) -
-      6 * 60 * 60 * 1000 -
-      1
+    Date.UTC(year, month - 1, day + 1) - 6 * 60 * 60 * 1000 - 1,
   );
 
   return { start, end };
@@ -107,9 +96,7 @@ const getDateRangeBD = (date) => {
 const getPreviousDateBD = (date) => {
   const [year, month, day] = date.split("-").map(Number);
 
-  const previous = new Date(
-    Date.UTC(year, month - 1, day - 1)
-  );
+  const previous = new Date(Date.UTC(year, month - 1, day - 1));
 
   const y = previous.getUTCFullYear();
   const m = String(previous.getUTCMonth() + 1).padStart(2, "0");
@@ -336,9 +323,7 @@ export const getDashboardSummary = async (req, res) => {
 
     // No date, empty date, or date=all means all-time data.
     const allTime =
-      rawDate === undefined ||
-      rawDate === "" ||
-      rawDate === "all";
+      rawDate === undefined || rawDate === "" || rawDate === "all";
 
     const selectedDate = allTime ? getTodayBD() : rawDate;
 
@@ -351,9 +336,7 @@ export const getDashboardSummary = async (req, res) => {
       });
     }
 
-    const cacheKey = allTime
-      ? "dashboard:all"
-      : `dashboard:${selectedDate}`;
+    const cacheKey = allTime ? "dashboard:all" : `dashboard:${selectedDate}`;
 
     const cached = getCached(cacheKey);
 
@@ -404,13 +387,9 @@ export const getDashboardSummary = async (req, res) => {
 
       Customer.countDocuments(currentFilter),
 
-      allTime
-        ? Promise.resolve(0)
-        : Product.countDocuments(previousFilter),
+      allTime ? Promise.resolve(0) : Product.countDocuments(previousFilter),
 
-      allTime
-        ? Promise.resolve(0)
-        : Customer.countDocuments(previousFilter),
+      allTime ? Promise.resolve(0) : Customer.countDocuments(previousFilter),
 
       Product.countDocuments({
         stock: { $lte: 5 },
@@ -488,10 +467,7 @@ export const getDashboardSummary = async (req, res) => {
             },
             sold: 1,
             price: {
-              $ifNull: [
-                "$product.discountPrice",
-                "$product.price",
-              ],
+              $ifNull: ["$product.discountPrice", "$product.price"],
             },
           },
         },
@@ -528,9 +504,7 @@ export const getDashboardSummary = async (req, res) => {
       {
         key: "sales",
         value: currentSales,
-        growth: allTime
-          ? null
-          : calcGrowth(currentSales, previousSales),
+        growth: allTime ? null : calcGrowth(currentSales, previousSales),
       },
       {
         key: "items",
@@ -593,11 +567,7 @@ export const getDashboardSummary = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Dashboard data could not be loaded.",
-      error:
-        process.env.NODE_ENV === "development"
-          ? error.message
-          : undefined,
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
     });
   }
 };
-

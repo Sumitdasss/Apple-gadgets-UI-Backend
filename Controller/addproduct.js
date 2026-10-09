@@ -1,4 +1,3 @@
-
 import mongoose from "mongoose";
 import Product from "../Model/Product.js";
 
@@ -110,33 +109,25 @@ const isValidObjectId = (id) =>
   typeof id === "string" && mongoose.Types.ObjectId.isValid(id);
 
 const cleanString = (value) =>
-  value === undefined || value === null
-    ? ""
-    : String(value).trim();
+  value === undefined || value === null ? "" : String(value).trim();
 
 const toBoolean = (value) =>
-  value === true ||
-  value === "true" ||
-  value === 1 ||
-  value === "1";
+  value === true || value === "true" || value === 1 || value === "1";
 
 const uniqueStrings = (items = []) => [
   ...new Set(
     items
       .filter((item) => item !== undefined && item !== null)
       .map((item) => String(item).trim())
-      .filter(Boolean)
+      .filter(Boolean),
   ),
 ];
 
 const uniqueIds = (items = []) => [
-  ...new Map(
-    items.filter(Boolean).map((id) => [String(id), id])
-  ).values(),
+  ...new Map(items.filter(Boolean).map((id) => [String(id), id])).values(),
 ];
 
-const escapeRegex = (value) =>
-  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const parseArrayFields = (body, fields) => {
   const result = {};
@@ -193,12 +184,7 @@ const sortOptions = {
 ========================================================= */
 
 const validateCategories = async (body) => {
-  const {
-    category,
-    subCategory,
-    childCategory,
-    subChildCategory,
-  } = body;
+  const { category, subCategory, childCategory, subChildCategory } = body;
 
   if (!isValidObjectId(category)) {
     throw new Error("Valid main category is required");
@@ -254,9 +240,7 @@ const validateCategories = async (body) => {
 
   if (subChildCategory) {
     if (!childCategory) {
-      throw new Error(
-        "Child category is required for sub-child category"
-      );
+      throw new Error("Child category is required for sub-child category");
     }
 
     const subChild = await SubChildCategory.findOne({
@@ -288,11 +272,7 @@ const validateCategories = async (body) => {
 
 const normalizeVariants = (variants) =>
   variants.map((variant) => {
-    if (
-      !variant ||
-      typeof variant !== "object" ||
-      Array.isArray(variant)
-    ) {
+    if (!variant || typeof variant !== "object" || Array.isArray(variant)) {
       throw new Error("Each variant must be an object");
     }
 
@@ -369,9 +349,7 @@ const saveProduct = async (req, res, isUpdate = false) => {
         : parseNumber(body.discountPrice, "discount price");
 
     if (discountPrice !== null && discountPrice >= price && price > 0) {
-      throw new Error(
-        "Discount price must be lower than product price"
-      );
+      throw new Error("Discount price must be lower than product price");
     }
 
     const rating =
@@ -415,9 +393,7 @@ const saveProduct = async (req, res, isUpdate = false) => {
 
     const files = req.files || {};
     const newImages = (files.images || []).map((file) => file.path);
-    const newColorImages = (files.colorImages || []).map(
-      (file) => file.path
-    );
+    const newColorImages = (files.colorImages || []).map((file) => file.path);
 
     const existingImages = isUpdate
       ? parseJSON(body.existingImages, existingProduct.images || [])
@@ -430,12 +406,10 @@ const saveProduct = async (req, res, isUpdate = false) => {
     // Keep only previously stored image URLs belonging to this product.
     const oldImages = existingProduct?.images || [];
     const retainedImages = existingImages.filter(
-      (image) => typeof image === "string" && oldImages.includes(image)
+      (image) => typeof image === "string" && oldImages.includes(image),
     );
 
-    const images = isUpdate
-      ? [...retainedImages, ...newImages]
-      : newImages;
+    const images = isUpdate ? [...retainedImages, ...newImages] : newImages;
 
     if (images.length === 0) {
       throw new Error("At least one product image is required");
@@ -470,8 +444,7 @@ const saveProduct = async (req, res, isUpdate = false) => {
         : 0;
 
     const manuallyEnteredDiscount =
-      body.discountPercentage !== undefined &&
-      body.discountPercentage !== ""
+      body.discountPercentage !== undefined && body.discountPercentage !== ""
         ? parseNumber(body.discountPercentage, "discount percentage", {
             min: 0,
             max: 100,
@@ -548,7 +521,7 @@ const saveProduct = async (req, res, isUpdate = false) => {
   } catch (error) {
     console.error(
       isUpdate ? "UPDATE PRODUCT ERROR:" : "ADD PRODUCT ERROR:",
-      error
+      error,
     );
 
     if (error.code === 11000) {
@@ -590,15 +563,13 @@ const saveProduct = async (req, res, isUpdate = false) => {
    ADD PRODUCT
 ========================================================= */
 
-export const addProduct = (req, res) =>
-  saveProduct(req, res, false);
+export const addProduct = (req, res) => saveProduct(req, res, false);
 
 /* =========================================================
    UPDATE PRODUCT
 ========================================================= */
 
-export const updateProduct = (req, res) =>
-  saveProduct(req, res, true);
+export const updateProduct = (req, res) => saveProduct(req, res, true);
 
 /* =========================================================
    CATEGORY LOOKUP
@@ -633,23 +604,29 @@ const getCategoryIds = async (category, level) => {
       SubCategory.find({
         mainCategory: category._id,
         isActive: { $ne: false },
-      }).select("_id").lean(),
+      })
+        .select("_id")
+        .lean(),
 
       ChildCategory.find({
         mainCategory: category._id,
         isActive: { $ne: false },
-      }).select("_id").lean(),
+      })
+        .select("_id")
+        .lean(),
 
       SubChildCategory.find({
         mainCategory: category._id,
         isActive: { $ne: false },
-      }).select("_id").lean(),
+      })
+        .select("_id")
+        .lean(),
     ]);
 
     ids.push(
       ...subs.map((item) => item._id),
       ...children.map((item) => item._id),
-      ...subChildren.map((item) => item._id)
+      ...subChildren.map((item) => item._id),
     );
   }
 
@@ -658,17 +635,21 @@ const getCategoryIds = async (category, level) => {
       ChildCategory.find({
         subCategory: category._id,
         isActive: { $ne: false },
-      }).select("_id").lean(),
+      })
+        .select("_id")
+        .lean(),
 
       SubChildCategory.find({
         subCategory: category._id,
         isActive: { $ne: false },
-      }).select("_id").lean(),
+      })
+        .select("_id")
+        .lean(),
     ]);
 
     ids.push(
       ...children.map((item) => item._id),
-      ...subChildren.map((item) => item._id)
+      ...subChildren.map((item) => item._id),
     );
   }
 
@@ -676,7 +657,9 @@ const getCategoryIds = async (category, level) => {
     const subChildren = await SubChildCategory.find({
       childCategory: category._id,
       isActive: { $ne: false },
-    }).select("_id").lean();
+    })
+      .select("_id")
+      .lean();
 
     ids.push(...subChildren.map((item) => item._id));
   }
@@ -694,7 +677,7 @@ export const getAllProduct = async (req, res) => {
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
     const limit = Math.min(
       48,
-      Math.max(1, parseInt(req.query.limit, 10) || 12)
+      Math.max(1, parseInt(req.query.limit, 10) || 12),
     );
     const skip = (page - 1) * limit;
 
@@ -761,7 +744,10 @@ export const getAllProduct = async (req, res) => {
 
     if (brandQuery) {
       filter.brand = {
-        $in: brandQuery.split(",").map((item) => item.trim()).filter(Boolean),
+        $in: brandQuery
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean),
       };
     }
 
@@ -862,21 +848,21 @@ export const getAllProduct = async (req, res) => {
 
     const storageValues = [
       ...(facet.storageFields || []).flatMap((value) =>
-        Array.isArray(value) ? value : value ? [value] : []
+        Array.isArray(value) ? value : value ? [value] : [],
       ),
       ...(facet.variants || []).flatMap((variants) =>
         Array.isArray(variants)
           ? variants.map((variant) => variant?.storage).filter(Boolean)
-          : []
+          : [],
       ),
     ];
 
     const colorValues = (facet.colors || []).flatMap((colors) =>
       Array.isArray(colors)
         ? colors.map((color) =>
-            typeof color === "string" ? color : color?.name
+            typeof color === "string" ? color : color?.name,
           )
-        : []
+        : [],
     );
 
     const validPrices = (facet.prices || []).filter(Number.isFinite);
@@ -935,7 +921,7 @@ export const getProducts = async (req, res) => {
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
     const limit = Math.min(
       48,
-      Math.max(1, parseInt(req.query.limit, 10) || 12)
+      Math.max(1, parseInt(req.query.limit, 10) || 12),
     );
     const skip = (page - 1) * limit;
 

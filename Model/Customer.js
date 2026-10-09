@@ -1,4 +1,4 @@
-import mongoose from "mongoose"
+import mongoose from "mongoose";
 
 const customerSchema = new mongoose.Schema({
   name: {
@@ -28,8 +28,7 @@ const customerSchema = new mongoose.Schema({
 });
 
 customerSchema.index({ createdAt: -1 });
- const Customer =
-  mongoose.models.Customer ||
-  mongoose.model("Customer", customerSchema);
+const Customer =
+  mongoose.models.Customer || mongoose.model("Customer", customerSchema);
 
-  export default Customer
+export default Customer;

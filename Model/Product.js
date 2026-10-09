@@ -107,7 +107,7 @@ const productSchema = new mongoose.Schema(
 
     stock: {
       type: Number,
-      
+
       min: 0,
     },
 
@@ -290,11 +290,10 @@ const productSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-  }
+  },
 );
 productSchema.index({ createdAt: -1 });
 const Product =
-  mongoose.models.Product ||
-  mongoose.model("Product", productSchema);
+  mongoose.models.Product || mongoose.model("Product", productSchema);
 
 export default Product;

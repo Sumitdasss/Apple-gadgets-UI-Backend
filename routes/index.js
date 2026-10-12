@@ -25,6 +25,9 @@ import {  createOrder  } from "../Controller/CREATODER.js";
 import { OderActivity } from "../Controller/ShowOderactivity.js";
 import { getDashboardSummary } from "../Controller/Deshbord.js";
 import { bulkUpdateOrders, deleteOrder, getOrders, updateOrder } from "../Controller/OrderMange.js";
+import { getMyProfile, login, register } from "../Controller/AuthController.js";
+import { verifyToken } from "../Middleware/authMiddleware.js";
+import { authorizeRoles } from "../Middleware/roleMiddleware.js";
 const router = express.Router();
 router.post(
   "/addproduct",
@@ -67,6 +70,15 @@ router.patch(
   "/:type/:id/banner",
   updateCategoryBanner
 );
+router.post("/register", register);
+router.post("/login", login);
+router.get(
+  "/me",
+  verifyToken,
+  authorizeRoles("customer", "admin"),
+  getMyProfile
+);
+
 router.get("/:id", getProductById);
 router.put(
   "/updateproduct/:id",

@@ -5,6 +5,7 @@ import DNS from "dns";
 
 import { connectDB } from "./config/db.js";
 import router from "./routes/index.js";
+import { apiResponse } from "./utils/ApiResponse.js";
 
 DNS.setServers(["1.1.1.1", "8.8.8.8"]);
 
@@ -32,8 +33,19 @@ app.use(express.urlencoded({ extended: true }));
 
 // ================= ROUTES =================
 app.use("/products", router);
+app.use("/api/users", router);
 app.use("/facebook", router);
 app.use("/category", router);
 app.use("/api/dashboard", router);
 
+
+
+
+
+
+app.use((err, req, res, next) => {
+  const statusCode = err.statusCode || 500;
+apiResponse(res, statusCode, err.message || "Internal server error", null);
+
+});
 export default app;

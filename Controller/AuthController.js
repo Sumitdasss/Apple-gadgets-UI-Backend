@@ -72,7 +72,7 @@ export const register = asyncHandler(async (req, res) => {
   });
 
   try {
-    await sendOtpEmail(normalizedEmail, otp, "verify");
+    await sendOtpEmail(normalizedEmail, otp, name, "verify");
   } catch (error) {
     // Keep the account unverified. Never return the OTP.
     console.error("Registration OTP email failed:", error.message);

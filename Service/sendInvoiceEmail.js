@@ -2,7 +2,6 @@ import nodemailer from "nodemailer";
 import PDFDocument from "pdfkit";
 
 // ================= SMTP CONFIGURATION =================
-
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST,
   port: Number(process.env.SMTP_PORT || 587),
@@ -17,7 +16,6 @@ const transporter = nodemailer.createTransport({
 });
 
 // ================= HELPER FUNCTIONS =================
-
 const money = (amount) =>
   `BDT ${Number(amount || 0).toLocaleString("en-BD", {
     minimumFractionDigits: 2,
@@ -29,8 +27,7 @@ const readable = (value = "") =>
     .replace(/_/g, " ")
     .replace(/\b\w/g, (char) => char.toUpperCase());
 
-// ================= PDF INVOICE =================
-
+// ================= PDF INVOICE (Colorful Design) =================
 export const generateInvoicePDF = (order) =>
   new Promise((resolve, reject) => {
     let doc;
@@ -38,154 +35,181 @@ export const generateInvoicePDF = (order) =>
     try {
       doc = new PDFDocument({
         size: "A4",
-        margin: 45,
+        margin: 40,
       });
 
       const chunks = [];
-
       doc.on("data", (chunk) => chunks.push(chunk));
       doc.on("error", reject);
-      doc.on("end", () => {
-        resolve(Buffer.concat(chunks));
-      });
+      doc.on("end", () => resolve(Buffer.concat(chunks)));
 
-      const pageBottom = 770;
+      const pageWidth = 595;
+      const pageBottom = 780;
+      const left = 40;
+      const right = 555;
+      const contentWidth = right - left;
 
-      const checkPage = (height = 40) => {
+      const checkPage = (height = 50) => {
         if (doc.y + height > pageBottom) {
           doc.addPage();
+          return true;
         }
+        return false;
       };
 
-      // Header
+      // ========== HEADER BAND ==========
+      doc.rect(0, 0, pageWidth, 90).fill("#ea580c");
+
+      doc
+        .fillColor("#ffffff")
+        .font("Helvetica-Bold")
+        .fontSize(24)
+        .text("APPLE GADGET BD", left, 28, {
+          width: contentWidth,
+          align: "left",
+        });
+
+      doc
+        .font("Helvetica")
+        .fontSize(10)
+        .fillColor("#ffedd5")
+        .text("GENUINE PRODUCTS  ·  BEST SERVICE", left, 56);
+
       doc
         .font("Helvetica-Bold")
-        .fontSize(25)
+        .fontSize(11)
+        .fillColor("#ffffff")
+        .text("ORDER BILL / INVOICE", left, 56, {
+          width: contentWidth,
+          align: "right",
+        });
+
+      // ========== ORDER META ==========
+      let y = 110;
+
+      doc
         .fillColor("#111827")
-        .text("APPLE GADGET BD");
+        .font("Helvetica-Bold")
+        .fontSize(12)
+        .text(`Order ID: ${order.orderId}`, left, y);
 
       doc
         .font("Helvetica")
         .fontSize(10)
         .fillColor("#6B7280")
-        .text("ORDER BILL / INVOICE");
+        .text(
+          `Date: ${new Date(order.createdAt || Date.now()).toLocaleString("en-GB")}`,
+          left,
+          y + 18
+        );
 
-      doc.moveDown(1.5);
-
-      doc
-        .font("Helvetica-Bold")
-        .fontSize(12)
-        .fillColor("#111827")
-        .text(`Order ID: ${order.orderId}`);
+      // Status badges (right side)
+      const paymentStatus = readable(order.paymentStatus || "unpaid");
+      const orderStatus = readable(order.status || "pending");
 
       doc
         .font("Helvetica")
-        .fontSize(10)
-        .text(
-          `Date: ${new Date(
-            order.createdAt || Date.now()
-          ).toLocaleString("en-GB")}`
-        );
+        .fontSize(9)
+        .fillColor("#059669")
+        .text(`Payment: ${paymentStatus}`, left, y, {
+          width: contentWidth,
+          align: "right",
+        });
 
-      doc.moveDown();
-
-      // Customer information
       doc
+        .fillColor("#2563EB")
+        .text(`Status: ${orderStatus}`, left, y + 14, {
+          width: contentWidth,
+          align: "right",
+        });
+
+      y = 160;
+
+      // ========== CUSTOMER BOX ==========
+      doc
+        .roundedRect(left, y, contentWidth, 95, 6)
+        .fill("#FFF7ED");
+
+      doc
+        .fillColor("#9A3412")
         .font("Helvetica-Bold")
-        .fontSize(14)
-        .text("Customer Information");
+        .fontSize(11)
+        .text("CUSTOMER INFORMATION", left + 14, y + 12);
 
-      doc.moveDown(0.5);
-
-      doc.font("Helvetica").fontSize(10);
-
-      doc.text(`Name: ${order.customerName || "N/A"}`);
-      doc.text(`Email: ${order.email || "N/A"}`);
-      doc.text(`Phone: ${order.phone || "N/A"}`);
+      doc.font("Helvetica").fontSize(10).fillColor("#111827");
 
       const area =
         typeof order.selectArea === "object"
-          ? order.selectArea?.name ||
-            order.selectArea?.label ||
-            "N/A"
+          ? order.selectArea?.name || order.selectArea?.label || "N/A"
           : order.selectArea || "N/A";
 
-      doc.text(`Delivery Area: ${String(area)}`);
-      doc.text(`Address: ${order.deliveryAddress || "N/A"}`);
+      const customerLines = [
+        `Name: ${order.customerName || "N/A"}`,
+        `Email: ${order.email || "N/A"}`,
+        `Phone: ${order.phone || "N/A"}`,
+        `Delivery Area: ${String(area)}`,
+        `Address: ${order.deliveryAddress || "N/A"}`,
+      ];
 
-      doc.moveDown(1.5);
+      customerLines.forEach((line, i) => {
+        doc.text(line, left + 14, y + 30 + i * 12, {
+          width: contentWidth - 28,
+        });
+      });
 
-      // Product table
-      const left = 45;
-      const right = 550;
-      const tableWidth = right - left;
+      y += 115;
 
-      let y = doc.y;
+      // ========== PRODUCTS TABLE ==========
+      const colProduct = left + 8;
+      const colQty = 320;
+      const colPrice = 365;
+      const colTotal = 450;
 
       const drawTableHeader = () => {
-        doc.rect(left, y, tableWidth, 25).fill("#F3F4F6");
+        doc.rect(left, y, contentWidth, 26).fill("#ea580c");
 
         doc
-          .fillColor("#111827")
+          .fillColor("#ffffff")
           .font("Helvetica-Bold")
           .fontSize(9);
 
-        doc.text("Product", left + 8, y + 8, {
-          width: 200,
-        });
+        doc.text("PRODUCT", colProduct, y + 8, { width: 260 });
+        doc.text("QTY", colQty, y + 8, { width: 35, align: "center" });
+        doc.text("PRICE", colPrice, y + 8, { width: 75, align: "right" });
+        doc.text("TOTAL", colTotal, y + 8, { width: 95, align: "right" });
 
-        doc.text("Qty", 335, y + 8, {
-          width: 30,
-        });
-
-        doc.text("Price", 370, y + 8, {
-          width: 75,
-        });
-
-        doc.text("Total", 455, y + 8, {
-          width: 90,
-        });
-
-        y += 32;
-        doc.y = y;
+        y += 30;
       };
 
       drawTableHeader();
 
-      for (const item of order.products || []) {
-        const name = String(item.name || "Product");
+      const products = order.products || [];
 
-        const variant = [
-          item.color,
-          item.ram,
-          item.storage,
-          item.size,
-        ]
+      products.forEach((item, index) => {
+        const name = String(item.name || "Product");
+        const variant = [item.color, item.ram, item.storage, item.size]
           .filter(Boolean)
           .join(" / ");
 
-        const description = variant
-          ? `${name}\n${variant}`
-          : name;
+        const description = variant ? `${name}\n${variant}` : name;
 
-        const descriptionHeight = doc.heightOfString(
-          description,
-          {
-            width: 195,
-            font: "Helvetica",
-            fontSize: 9,
-          }
-        );
+        const descriptionHeight = doc.heightOfString(description, {
+          width: 255,
+          font: "Helvetica",
+          fontSize: 9,
+        });
 
-        const rowHeight = Math.max(
-          descriptionHeight + 8,
-          25
-        );
+        const rowHeight = Math.max(descriptionHeight + 12, 28);
 
-        if (y + rowHeight > pageBottom) {
+        if (y + rowHeight > pageBottom - 120) {
           doc.addPage();
-          y = 45;
+          y = 40;
           drawTableHeader();
+        }
+
+        // Alternating row background
+        if (index % 2 === 0) {
+          doc.rect(left, y - 4, contentWidth, rowHeight).fill("#F8FAFC");
         }
 
         doc
@@ -193,119 +217,136 @@ export const generateInvoicePDF = (order) =>
           .fontSize(9)
           .fillColor("#111827");
 
-        doc.text(description, left + 8, y, {
-          width: 195,
+        doc.text(description, colProduct, y, { width: 255 });
+
+        doc.text(String(item.quantity || 0), colQty, y, {
+          width: 35,
+          align: "center",
         });
 
-        doc.text(String(item.quantity || 0), 335, y, {
-          width: 30,
-        });
-
-        doc.text(money(item.price), 370, y, {
+        doc.text(money(item.price), colPrice, y, {
           width: 75,
+          align: "right",
         });
 
         const itemTotal =
           item.subtotal ??
-          Number(item.price || 0) *
-            Number(item.quantity || 0);
+          Number(item.price || 0) * Number(item.quantity || 0);
 
-        doc.text(money(itemTotal), 455, y, {
-          width: 90,
-        });
+        doc
+          .font("Helvetica-Bold")
+          .text(money(itemTotal), colTotal, y, {
+            width: 95,
+            align: "right",
+          });
 
         y += rowHeight;
 
+        // Light divider
         doc
           .moveTo(left, y)
           .lineTo(right, y)
-          .strokeColor("#E5E7EB")
+          .strokeColor("#E2E8F0")
+          .lineWidth(0.5)
           .stroke();
 
-        y += 8;
-      }
+        y += 4;
+      });
 
-      // Totals
-      y += 15;
-      doc.y = y;
+      y += 18;
 
-      checkPage(150);
-      y = doc.y;
+      // ========== SUMMARY BOX ==========
+      checkPage(160);
 
-      const summaryRow = (label, value, bold = false) => {
-        doc
-          .font(bold ? "Helvetica-Bold" : "Helvetica")
-          .fontSize(bold ? 11 : 10)
-          .fillColor("#111827");
-
-        doc.text(label, 330, y, {
-          width: 120,
-        });
-
-        doc.text(value, 450, y, {
-          width: 95,
-          align: "right",
-        });
-
-        y += 23;
-        doc.y = y;
-      };
-
-      summaryRow("Subtotal", money(order.subTotal));
-
-      summaryRow(
-        "Delivery Charge",
-        money(order.deliveryCharge)
-      );
-
-      summaryRow(
-        "Discount",
-        `- ${money(order.discountAmount)}`
-      );
+      const summaryX = 320;
+      const summaryWidth = 235;
 
       doc
-        .moveTo(330, y)
-        .lineTo(545, y)
-        .strokeColor("#9CA3AF")
+        .roundedRect(summaryX, y, summaryWidth, 115, 6)
+        .fill("#FFF7ED");
+
+      doc
+        .fillColor("#9A3412")
+        .font("Helvetica-Bold")
+        .fontSize(10)
+        .text("PAYMENT SUMMARY", summaryX + 14, y + 12);
+
+      const summaryRow = (label, value, isTotal = false, offsetY) => {
+        doc
+          .font(isTotal ? "Helvetica-Bold" : "Helvetica")
+          .fontSize(isTotal ? 11 : 10)
+          .fillColor(isTotal ? "#ea580c" : "#111827");
+
+        doc.text(label, summaryX + 14, offsetY, { width: 100 });
+        doc.text(value, summaryX + 14, offsetY, {
+          width: summaryWidth - 28,
+          align: "right",
+        });
+      };
+
+      summaryRow("Subtotal", money(order.subTotal), false, y + 34);
+      summaryRow("Delivery Charge", money(order.deliveryCharge), false, y + 52);
+      summaryRow("Discount", `- ${money(order.discountAmount)}`, false, y + 70);
+
+      // Divider
+      doc
+        .moveTo(summaryX + 14, y + 88)
+        .lineTo(summaryX + summaryWidth - 14, y + 88)
+        .strokeColor("#FDBA74")
+        .lineWidth(1)
         .stroke();
 
-      y += 12;
-      doc.y = y;
+      summaryRow("TOTAL PAYABLE", money(order.totalAmount), true, y + 96);
 
-      summaryRow(
-        "TOTAL PAYABLE",
-        money(order.totalAmount),
-        true
-      );
+      y += 135;
 
-      checkPage(75);
-      doc.moveDown();
+      // ========== PAYMENT DETAILS ==========
+      checkPage(60);
 
       doc
         .font("Helvetica")
-        .fontSize(10)
-        .fillColor("#374151")
+        .fontSize(9)
+        .fillColor("#64748B")
         .text(
-          `Payment Method: ${order.paymentMethod || "N/A"}`
+          `Payment Method: ${readable(order.paymentMethod || "N/A")}`,
+          left,
+          y
         );
-
       doc.text(
-        `Payment Status: ${order.paymentStatus || "unpaid"}`
+        `Payment Status: ${readable(order.paymentStatus || "unpaid")}`,
+        left,
+        y + 14
+      );
+      doc.text(
+        `Order Status: ${readable(order.status || "pending")}`,
+        left,
+        y + 28
       );
 
-      doc.text(
-        `Order Status: ${order.status || "pending"}`
-      );
-
-      doc.moveDown(2);
+      // ========== FOOTER ==========
+      const footerY = 800;
 
       doc
+        .rect(0, footerY - 30, pageWidth, 50)
+        .fill("#0f172a");
+
+      doc
+        .fillColor("#ffffff")
+        .font("Helvetica-Bold")
         .fontSize(11)
-        .fillColor("#111827")
-        .text(
-          "Thank you for shopping with Apple Gadget BD!",
-          { align: "center" }
-        );
+        .text("Thank you for shopping with Apple Gadget BD!", 0, footerY - 12, {
+          width: pageWidth,
+          align: "center",
+        });
+
+      doc
+        .font("Helvetica")
+        .fontSize(8)
+        .fillColor("#94A3B8")
+        .text("Please keep this invoice for your records.", 0, footerY + 4, {
+          width: pageWidth,
+          align: "center",
+        });
 
       doc.end();
     } catch (error) {
@@ -314,7 +355,6 @@ export const generateInvoicePDF = (order) =>
   });
 
 // ================= SEND INVOICE EMAIL =================
-
 export const sendInvoiceEmail = async (order) => {
   try {
     // Validate SMTP configuration
@@ -338,12 +378,10 @@ export const sendInvoiceEmail = async (order) => {
     const pdfBuffer = await generateInvoicePDF(order);
 
     const frontendUrl = (
-      process.env.FRONTEND_URL ||
-      "http://localhost:3000"
+      process.env.FRONTEND_URL || "http://localhost:3000"
     ).replace(/\/+$/, "");
 
-    const invoiceUrl =
-      `${frontendUrl}/invoice/${encodeURIComponent(order.orderId)}`;
+    const invoiceUrl = `${frontendUrl}/invoice/${encodeURIComponent(order.orderId)}`;
 
     // Send complete email
     await transporter.sendMail({

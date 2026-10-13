@@ -268,23 +268,21 @@ export const sendInvoiceEmail = async (order) => {
   const pdfBuffer = await generateInvoicePDF(order);
 
   const frontendUrl = (
-    process.env.FRONTEND_URL ||
+    process.env.FRONTEND_URL||
     "http://localhost:3000"
   ).replace(/\/+$/, "");
 
   const invoiceUrl =
     `${frontendUrl}/invoice/${encodeURIComponent(order.orderId)}`;
 
-  await transporter.sendMail({
-    from:
-      process.env.MAIL_FROM ||
-      process.env.SMTP_USER,
+ await transporter.sendMail({
+  from: process.env.MAIL_FROM || process.env.SMTP_USER,
 
-    to: order.email,
+  to: order.email,
 
-    subject: `Shopspace Invoice - ${order.orderId}`,
+  subject: `Apple Gadget BD Invoice - ${order.orderId}`,
 
-    text: `Hello ${order.customerName || "Customer"},
+  text: `Hello ${order.customerName || "Customer"},
 
 Your order has been placed successfully.
 
@@ -293,32 +291,141 @@ Total: ${money(order.totalAmount)}
 
 Your PDF invoice is attached to this email.
 
-Invoice page: ${invoiceUrl}
+View invoice online: ${invoiceUrl}
 
-Thank you for shopping with Shopspace.`,
+Thank you for shopping with Apple Gadget BD.`,
 
-    html: `
-      <div style="font-family:Arial,sans-serif;max-width:580px;margin:auto;padding:24px;color:#111827">
-        <h1 style="margin-bottom:5px">SHOPSPACE</h1>
-        <p>Your order has been placed successfully.</p>
-        <div style="padding:18px;background:#f3f4f6;border-radius:8px">
-          <p><b>Order ID:</b> ${order.orderId}</p>
-          <p><b>Total:</b> ${money(order.totalAmount)}</p>
-        </div>
-        <p>Your PDF billing invoice is attached.</p>
-        <p><a href="${invoiceUrl}">View Invoice</a></p>
-        <p>Thank you for shopping with Shopspace!</p>
-      </div>
-    `,
+  html: `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Apple Gadget BD Invoice</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f1f5f9;font-family:Arial,Helvetica,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f1f5f9;padding:40px 16px;">
+    <tr>
+      <td align="center">
+        <table width="100%" cellpadding="0" cellspacing="0" style="max-width:580px;background-color:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.06);">
 
-    attachments: [
-      {
-        filename: `Invoice-${order.orderId}.pdf`,
-        content: pdfBuffer,
-        contentType: "application/pdf",
-      },
-    ],
-  });
+          <!-- Header -->
+          <tr>
+            <td style="background:linear-gradient(135deg,#f97316 0%,#ea580c 100%);padding:32px 28px;text-align:center;">
+              <h1 style="margin:0;font-size:24px;font-weight:800;color:#ffffff;letter-spacing:1px;">
+                APPLE GADGET BD
+              </h1>
+              <p style="margin:8px 0 0;font-size:12px;color:rgba(255,255,255,0.9);letter-spacing:1.5px;font-weight:500;">
+                GENUINE PRODUCTS · BEST SERVICE
+              </p>
+            </td>
+          </tr>
+
+          <!-- Success badge -->
+          <tr>
+            <td style="padding:28px 28px 0;text-align:center;">
+              <div style="display:inline-block;background-color:#ecfdf5;border:1px solid #a7f3d0;border-radius:50px;padding:8px 18px;">
+                <span style="font-size:13px;font-weight:600;color:#059669;">
+                  ✓ Order Placed Successfully
+                </span>
+              </div>
+            </td>
+          </tr>
+
+          <!-- Body -->
+          <tr>
+            <td style="padding:24px 28px 32px;">
+              <p style="margin:0 0 6px;font-size:17px;font-weight:700;color:#0f172a;">
+                Hello ${order.customerName || "Customer"},
+              </p>
+              <p style="margin:0 0 28px;font-size:14px;line-height:1.65;color:#475569;">
+                Thank you for your purchase. Your order has been confirmed and the invoice is ready.
+              </p>
+
+              <!-- Order summary card -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#fff7ed;border:1px solid #fed7aa;border-radius:12px;margin-bottom:28px;">
+                <tr>
+                  <td style="padding:22px 24px;">
+                    <table width="100%" cellpadding="0" cellspacing="0">
+                      <tr>
+                        <td style="padding-bottom:14px;font-size:13px;color:#9a3412;">Order ID</td>
+                        <td align="right" style="padding-bottom:14px;font-size:14px;font-weight:700;color:#0f172a;">
+                          ${order.orderId}
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding-bottom:14px;font-size:13px;color:#9a3412;">Total Payable</td>
+                        <td align="right" style="padding-bottom:14px;font-size:18px;font-weight:800;color:#ea580c;">
+                          ${money(order.totalAmount)}
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="font-size:13px;color:#9a3412;">Payment Status</td>
+                        <td align="right" style="font-size:13px;font-weight:600;color:#059669;">
+                          ${readable(order.paymentStatus || "unpaid")}
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+
+              <p style="margin:0 0 22px;font-size:14px;line-height:1.65;color:#475569;">
+                Your PDF invoice is attached to this email. You can also view it online anytime:
+              </p>
+
+              <!-- CTA Button -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
+                <tr>
+                  <td align="center">
+                    <a href="${invoiceUrl}"
+                       style="display:inline-block;background-color:#ea580c;color:#ffffff;text-decoration:none;font-size:15px;font-weight:700;padding:14px 36px;border-radius:10px;box-shadow:0 4px 12px rgba(234,88,12,0.25);">
+                      View Invoice Online
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+              <p style="margin:0;font-size:13px;line-height:1.6;color:#64748b;text-align:center;">
+                Need help with your order? Just reply to this email — we’re happy to assist.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background-color:#0f172a;padding:24px 28px;text-align:center;">
+              <p style="margin:0 0 6px;font-size:14px;font-weight:700;color:#ffffff;">
+                Thank you for shopping with Apple Gadget BD
+              </p>
+              <p style="margin:0;font-size:12px;color:#94a3b8;">
+                Please keep this email and the attached invoice for your records.
+              </p>
+            </td>
+          </tr>
+
+        </table>
+
+        <!-- Bottom note -->
+        <p style="margin:24px 0 0;font-size:11px;color:#94a3b8;text-align:center;line-height:1.5;">
+          This is an automated message from Apple Gadget BD.<br>
+          If you did not place this order, please ignore this email.
+        </p>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+  `,
+
+  attachments: [
+    {
+      filename: `Invoice-${order.orderId}.pdf`,
+      content: pdfBuffer,
+      contentType: "application/pdf",
+    },
+  ],
+});
 
   return true;
 };

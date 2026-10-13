@@ -16,22 +16,28 @@ export const sendOtpEmail = async (email, otp, userName, purpose = "verify") => 
 
 
 await transporter.sendMail({
-  from: `"Shopspace" <${process.env.MAIL_FROM || process.env.SMTP_USER}>`,
+  from: `"Apple Gadgets" <${process.env.MAIL_FROM || process.env.SMTP_USER}>`,
   to: email,
 
   subject: isLogin
-    ? "🔐 Your Shopspace Login Verification Code"
-    : "✨ Welcome to Shopspace — Verify Your Email",
+    ? "🔐 Your Apple Gadgets Login Verification Code"
+    : "Welcome to Apple Gadgets — Verify Your Email",
 
   text: `Hello ${userName || "there"},
 
-Your ${isLogin ? "login verification" : "email verification"} OTP is ${otp}.
+${
+  isLogin
+    ? "We received a request to sign in to your Apple Gadgets account."
+    : "Welcome to Apple Gadgets! Please verify your email address to complete your registration."
+}
 
-This code expires in 5 minutes. For your security, never share this code with anyone.
+Your verification code is: ${otp}
+
+This code expires in 5 minutes. Never share this code with anyone.
 
 If you did not request this code, please ignore this email.
 
-Shopspace Team`,
+Apple Gadgets Team`,
 
   html: `
   <!DOCTYPE html>
@@ -39,17 +45,19 @@ Shopspace Team`,
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Shopspace Verification</title>
+    <title>Apple Gadgets Verification</title>
   </head>
 
-  <body style="margin:0;padding:0;background:#f3f4f8;font-family:Arial,Helvetica,sans-serif;color:#1f2937;">
+  <body style="margin:0;padding:0;background:#f5f5f7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;color:#1d1d1f;">
 
+    <!-- Preview Text -->
     <div style="display:none;max-height:0;overflow:hidden;opacity:0;">
-      Your Shopspace verification code is ${otp}. It expires in 5 minutes.
+      Your Apple Gadgets verification code is ${otp}. It expires in 5 minutes.
     </div>
 
     <table role="presentation" width="100%" cellspacing="0" cellpadding="0"
-      style="background:#f3f4f8;padding:35px 12px;">
+      style="background:#f5f5f7;padding:35px 12px;">
+
       <tr>
         <td align="center">
 
@@ -59,71 +67,80 @@ Shopspace Team`,
             <!-- Premium Header -->
             <tr>
               <td align="center"
-                style="padding:35px 25px;background:#17152f;background-image:linear-gradient(135deg,#17152f,#5145cd);">
+                style="padding:35px 24px 30px;background:#111111;">
 
-                <div style="font-size:29px;font-weight:800;letter-spacing:-1px;color:#ffffff;">
-                  SHOP<span style="color:#a5f3fc;">SPACE</span>
+                <div style="font-size:25px;font-weight:800;letter-spacing:-1px;color:#ffffff;">
+                  APPLE <span style="color:#b6b6b6;">GADGETS</span>
                 </div>
 
-                <p style="margin:10px 0 0;font-size:12px;letter-spacing:3px;color:#dcd9ff;">
-                  YOUR WORLD. YOUR SHOPPING.
+                <p style="margin:12px 0 0;font-size:11px;letter-spacing:3px;color:#b8b8b8;">
+                  YOUR TECH. YOUR WORLD.
                 </p>
+
+                <div style="margin:24px auto 0;width:48px;height:3px;background:#a5a5a5;border-radius:5px;"></div>
 
               </td>
             </tr>
 
-            <!-- Email Content -->
+            <!-- Main Content -->
             <tr>
-              <td style="padding:35px 30px 20px;">
+              <td style="padding:36px 30px 25px;">
 
-                <p style="margin:0 0 10px;font-size:14px;color:#6b7280;">
-                  ${isLogin ? "SECURE LOGIN" : "EMAIL VERIFICATION"}
+                <p style="margin:0 0 12px;font-size:11px;font-weight:700;letter-spacing:2px;color:#86868b;">
+                  ${isLogin ? "SECURE ACCOUNT LOGIN" : "EMAIL ADDRESS VERIFICATION"}
                 </p>
 
-                <h1 style="margin:0 0 18px;font-size:27px;line-height:1.35;color:#17152f;">
-                  ${isLogin ? "Welcome back" : "Welcome to Shopspace"},
-                  ${userName || "there"}!
-                </h1>
-
-                <p style="margin:0 0 25px;font-size:15px;line-height:1.8;color:#5b6170;">
+                <h1 style="margin:0 0 18px;font-size:28px;line-height:1.3;letter-spacing:-0.7px;color:#1d1d1f;">
                   ${
                     isLogin
-                      ? "We received a request to sign in to your account. Use the verification code below to continue securely."
-                      : "We're excited to have you here! Please verify your email address using the code below to complete your registration."
+                      ? "Welcome back"
+                      : "Welcome to Apple Gadgets"
+                  }${userName ? `, ${userName}` : ""}.
+                </h1>
+
+                <p style="margin:0 0 26px;font-size:15px;line-height:1.8;color:#6e6e73;">
+                  ${
+                    isLogin
+                      ? "We received a request to sign in to your account. Enter the verification code below to continue."
+                      : "Thank you for joining Apple Gadgets. Verify your email address with the code below to complete your registration."
                   }
                 </p>
 
-                <!-- OTP Box -->
-                <div style="padding:25px 15px;text-align:center;background:#f5f3ff;border:1px solid #e5e0ff;border-radius:16px;">
+                <!-- OTP Card -->
+                <div style="padding:28px 16px;text-align:center;background:#f5f5f7;border:1px solid #e5e5e7;border-radius:16px;">
 
-                  <p style="margin:0 0 14px;font-size:12px;font-weight:700;letter-spacing:2px;color:#6d5ce8;">
+                  <p style="margin:0 0 18px;font-size:11px;font-weight:700;letter-spacing:2px;color:#6e6e73;">
                     YOUR VERIFICATION CODE
                   </p>
 
-                  <div style="display:inline-block;padding:15px 20px;background:#ffffff;border:1px solid #e6e2ff;border-radius:12px;font-size:34px;font-weight:800;letter-spacing:10px;color:#5145cd;">
+                  <div style="display:inline-block;padding:15px 18px;background:#ffffff;border:1px solid #dedee2;border-radius:12px;font-size:32px;font-weight:750;letter-spacing:8px;color:#1d1d1f;">
                     ${otp}
                   </div>
 
-                  <p style="margin:16px 0 0;font-size:13px;color:#6b7280;">
-                    ⏱ Expires in <strong style="color:#dc2626;">5 minutes</strong>
+                  <p style="margin:18px 0 0;font-size:13px;color:#6e6e73;">
+                    This code expires in
+                    <strong style="color:#d93025;">5 minutes</strong>.
                   </p>
 
                 </div>
 
                 <!-- Security Notice -->
-                <div style="margin-top:25px;padding:16px;background:#fff8eb;border-left:4px solid #f59e0b;border-radius:8px;">
+                <div style="margin-top:25px;padding:17px;background:#fafafa;border:1px solid #e8e8ed;border-radius:12px;">
 
-                  <p style="margin:0;font-size:13px;line-height:1.7;color:#92400e;">
-                    <strong>Security reminder</strong><br />
-                    Never share this code with anyone. Shopspace will never ask you to disclose your OTP.
+                  <p style="margin:0 0 7px;font-size:14px;font-weight:700;color:#1d1d1f;">
+                    Keep your account secure
+                  </p>
+
+                  <p style="margin:0;font-size:13px;line-height:1.8;color:#6e6e73;">
+                    Never share your verification code with anyone. Apple Gadgets will never ask you to disclose your OTP.
                   </p>
 
                 </div>
 
-                <p style="margin:25px 0 0;font-size:14px;line-height:1.8;color:#6b7280;">
-                  If you didn't request this ${
+                <p style="margin:25px 0 0;font-size:13px;line-height:1.8;color:#6e6e73;">
+                  Didn't request this ${
                     isLogin ? "login" : "verification"
-                  }, you can safely ignore this email. Your account remains protected.
+                  }? You can safely ignore this email. No action is required.
                 </p>
 
               </td>
@@ -132,19 +149,21 @@ Shopspace Team`,
             <!-- Footer -->
             <tr>
               <td align="center"
-                style="padding:25px 20px;background:#fafaff;border-top:1px solid #eeeef5;">
+                style="padding:25px 22px;background:#fafafa;border-top:1px solid #eeeeef;">
 
-                <p style="margin:0 0 8px;font-size:14px;font-weight:700;color:#302b60;">
-                  Shopspace
+                <p style="margin:0 0 8px;font-size:15px;font-weight:750;letter-spacing:-0.3px;color:#1d1d1f;">
+                  Apple Gadgets
                 </p>
 
-                <p style="margin:0;font-size:12px;line-height:1.7;color:#9ca3af;">
-                  Shopping made simple. Security made important.<br />
+                <p style="margin:0;font-size:12px;line-height:1.8;color:#86868b;">
+                  Your trusted destination for Apple products and accessories.<br />
                   This is an automated email. Please do not reply.
                 </p>
 
-                <p style="margin:15px 0 0;font-size:11px;color:#b0b4c0;">
-                  © ${new Date().getFullYear()} Shopspace. All rights reserved.
+                <div style="margin:20px auto;width:35px;height:1px;background:#d2d2d7;"></div>
+
+                <p style="margin:0;font-size:11px;color:#a1a1a6;">
+                  &copy; ${new Date().getFullYear()} Apple Gadgets. All rights reserved.
                 </p>
 
               </td>
@@ -152,13 +171,19 @@ Shopspace Team`,
 
           </table>
 
+          <p style="margin:18px 0 0;font-size:11px;line-height:1.7;color:#86868b;text-align:center;">
+            This message was sent to ${email} for account security purposes.
+          </p>
+
         </td>
       </tr>
+
     </table>
 
   </body>
   </html>
   `,
 });
+
 
 };

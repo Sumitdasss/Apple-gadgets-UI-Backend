@@ -36,6 +36,7 @@ app.use("/products", router);
 app.use("/api/users", router);
 app.use("/facebook", router);
 app.use("/category", router);
+app.use("/api/orders",  router);
 app.use("/api/dashboard", router);
 
 

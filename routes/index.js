@@ -25,7 +25,7 @@ import {  createOrder  } from "../Controller/CREATODER.js";
 import { OderActivity } from "../Controller/ShowOderactivity.js";
 import { getDashboardSummary } from "../Controller/Deshbord.js";
 import { bulkUpdateOrders, deleteOrder, getOrders, updateOrder } from "../Controller/OrderMange.js";
-import { getMyProfile, login, register } from "../Controller/AuthController.js";
+import { getMyProfile, login, register, resendEmailOtp, verifyEmailOtp, verifyLoginOtp } from "../Controller/AuthController.js";
 import { verifyToken } from "../Middleware/authMiddleware.js";
 import { authorizeRoles } from "../Middleware/roleMiddleware.js";
 const router = express.Router();
@@ -71,7 +71,10 @@ router.patch(
   updateCategoryBanner
 );
 router.post("/register", register);
+router.post("/verify-email-otp", verifyEmailOtp);
+router.post("/resend-email-otp", resendEmailOtp);
 router.post("/login", login);
+router.post("/verify-login-otp", verifyLoginOtp);
 router.get(
   "/me",
   verifyToken,

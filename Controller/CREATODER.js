@@ -1,16 +1,17 @@
+// Controller/MainOrderController.js
+
 import mongoose from "mongoose";
 import MainOrder from "../Model/MainOrder.js";
 import Customer from "../Model/Customer.js";
 import Product from "../Model/Product.js";
+import { sendInvoiceEmail } from "../Service/sendInvoiceEmail.js";
 
 /* =========================================================
    HELPER
 ========================================================= */
 
 const normalizeValue = (value) => {
-  if (value === null || value === undefined) {
-    return "";
-  }
+  if (value === null || value === undefined) return "";
 
   if (typeof value === "string" || typeof value === "number") {
     return String(value).trim();
@@ -35,18 +36,15 @@ const normalizeValue = (value) => {
    GET VARIANT COLOR
 ========================================================= */
 
-const getVariantColor = (variant) => {
-  return normalizeValue(variant?.color);
-};
+const getVariantColor = (variant) =>
+  normalizeValue(variant?.color);
 
 /* =========================================================
    GET VARIANT ID
 ========================================================= */
 
 const getVariantId = (variant) => {
-  if (!variant?._id) {
-    return null;
-  }
+  if (!variant?._id) return null;
 
   const id = normalizeValue(variant._id);
 
@@ -58,33 +56,31 @@ const getVariantId = (variant) => {
 ========================================================= */
 
 const findMatchingVariant = (product, selectedVariant = {}) => {
-  if (!Array.isArray(product?.variants) || product.variants.length === 0) {
+  if (!Array.isArray(product?.variants) || !product.variants.length) {
     return null;
   }
 
   const selectedColor = normalizeValue(selectedVariant.color);
-
   const selectedRam = normalizeValue(selectedVariant.ram);
-
   const selectedStorage = normalizeValue(selectedVariant.storage);
 
-  const variant = product.variants.find((item) => {
-    const variantColor = getVariantColor(item);
+  return (
+    product.variants.find((item) => {
+      const colorMatch =
+        !selectedColor ||
+        getVariantColor(item) === selectedColor;
 
-    const variantRam = normalizeValue(item?.ram);
+      const ramMatch =
+        !selectedRam ||
+        normalizeValue(item?.ram) === selectedRam;
 
-    const variantStorage = normalizeValue(item?.storage);
+      const storageMatch =
+        !selectedStorage ||
+        normalizeValue(item?.storage) === selectedStorage;
 
-    const colorMatch = !selectedColor || variantColor === selectedColor;
-
-    const ramMatch = !selectedRam || variantRam === selectedRam;
-
-    const storageMatch = !selectedStorage || variantStorage === selectedStorage;
-
-    return colorMatch && ramMatch && storageMatch;
-  });
-
-  return variant || null;
+      return colorMatch && ramMatch && storageMatch;
+    }) || null
+  );
 };
 
 /* =========================================================
@@ -97,7 +93,8 @@ const getColorImage = (product, selectedColor) => {
   }
 
   const color = product.colors.find(
-    (item) => normalizeValue(item?.name) === normalizeValue(selectedColor),
+    (item) =>
+      normalizeValue(item?.name) === normalizeValue(selectedColor),
   );
 
   return color?.image || "";
@@ -126,9 +123,7 @@ export const createOrder = async (req, res) => {
       orderSource,
     } = req.body;
 
-    /* =====================================================
-       BASIC VALIDATION
-    ===================================================== */
+    /* BASIC VALIDATION */
 
     if (!customerName?.trim()) {
       return res.status(400).json({
@@ -172,11 +167,10 @@ export const createOrder = async (req, res) => {
       });
     }
 
-    /* =====================================================
-       FIND / CREATE CUSTOMER
-    ===================================================== */
+    /* FIND / CREATE CUSTOMER */
 
     const cleanPhone = phone.trim();
+    const cleanEmail = email?.trim().toLowerCase() || "";
 
     let customer = await Customer.findOne({
       phone: cleanPhone,
@@ -185,15 +179,15 @@ export const createOrder = async (req, res) => {
     if (!customer) {
       customer = await Customer.create({
         name: customerName.trim(),
-        email: email?.trim() || "",
+        email: cleanEmail,
         phone: cleanPhone,
         address: deliveryAddress.trim(),
       });
     } else {
       customer.name = customerName.trim();
 
-      if (email?.trim()) {
-        customer.email = email.trim();
+      if (cleanEmail) {
+        customer.email = cleanEmail;
       }
 
       customer.address = deliveryAddress.trim();
@@ -201,24 +195,19 @@ export const createOrder = async (req, res) => {
       await customer.save();
     }
 
-    /* =====================================================
-       PREPARE PRODUCTS
-    ===================================================== */
+    /* PREPARE PRODUCTS */
 
     const orderProducts = [];
-
     const stockUpdates = [];
 
-    /* =====================================================
-       LOOP PRODUCTS
-    ===================================================== */
-
     for (const item of products) {
-      /* ===================================================
-         PRODUCT ID
-      =================================================== */
+      /* PRODUCT ID */
 
-      const productId = item.productId || item.product || item._id || item.id;
+      const productId =
+        item.productId ||
+        item.product ||
+        item._id ||
+        item.id;
 
       if (!productId) {
         return res.status(400).json({
@@ -234,9 +223,7 @@ export const createOrder = async (req, res) => {
         });
       }
 
-      /* ===================================================
-         FIND PRODUCT
-      =================================================== */
+      /* FIND PRODUCT */
 
       const product = await Product.findById(productId);
 
@@ -247,15 +234,18 @@ export const createOrder = async (req, res) => {
         });
       }
 
-      /* ===================================================
-         QUANTITY
-      =================================================== */
+      /* QUANTITY */
 
-      const quantity = Math.max(1, Number(item.quantity || 1));
+      const quantity = Number(item.quantity || 1);
 
-      /* ===================================================
-         SELECTED VARIANT
-      =================================================== */
+      if (!Number.isSafeInteger(quantity) || quantity < 1) {
+        return res.status(400).json({
+          success: false,
+          message: `${product.name}: invalid quantity`,
+        });
+      }
+
+      /* SELECTED VARIANT */
 
       const selectedVariant = item.variant || {
         color: item.color || "",
@@ -265,41 +255,31 @@ export const createOrder = async (req, res) => {
         sku: item.sku || "",
       };
 
-      /* ===================================================
-         FIND DATABASE VARIANT
-      =================================================== */
+      /* FIND DATABASE VARIANT */
 
       let matchedVariant = null;
 
-      if (Array.isArray(product.variants) && product.variants.length > 0) {
-        /* ================================================
-           FIRST:
-           FIND USING EXACT VARIANT ID
-        ================================================ */
-
-        const selectedVariantId = normalizeValue(selectedVariant.variantId);
+      if (Array.isArray(product.variants) && product.variants.length) {
+        const selectedVariantId = normalizeValue(
+          selectedVariant.variantId,
+        );
 
         if (
           selectedVariantId &&
           mongoose.Types.ObjectId.isValid(selectedVariantId)
         ) {
           matchedVariant = product.variants.find(
-            (variant) => String(variant._id) === selectedVariantId,
+            (variant) =>
+              String(variant._id) === selectedVariantId,
           );
         }
 
-        /* ================================================
-           SECOND:
-           FIND USING COLOR + RAM + STORAGE
-        ================================================ */
-
         if (!matchedVariant) {
-          matchedVariant = findMatchingVariant(product, selectedVariant);
+          matchedVariant = findMatchingVariant(
+            product,
+            selectedVariant,
+          );
         }
-
-        /* ================================================
-           VARIANT REQUIRED
-        ================================================ */
 
         if (!matchedVariant) {
           return res.status(400).json({
@@ -309,9 +289,7 @@ export const createOrder = async (req, res) => {
         }
       }
 
-      /* ===================================================
-         VARIANT VALUES
-      =================================================== */
+      /* VARIANT VALUES */
 
       const color = matchedVariant
         ? getVariantColor(matchedVariant)
@@ -325,52 +303,33 @@ export const createOrder = async (req, res) => {
         ? normalizeValue(matchedVariant.storage)
         : normalizeValue(selectedVariant.storage || item.storage);
 
-      /* ===================================================
-         EXACT STOCK CHECK
-      =================================================== */
+      /* STOCK CHECK */
 
       const currentStock = matchedVariant
         ? Number(matchedVariant.stock || 0)
         : Number(product.stock || 0);
 
-      /* ===================================================
-         CHECK STOCK
-      =================================================== */
-
       if (currentStock < quantity) {
         return res.status(400).json({
           success: false,
-
-          message: `${product.name}${color ? ` (${color}` : ""}${
-            ram ? ` / ${ram}` : ""
-          }${storage ? ` / ${storage}` : ""}${
-            color ? ")" : ""
-          } has only ${currentStock} item(s) in stock`,
+          message: `${product.name} has only ${currentStock} item(s) in stock`,
         });
       }
 
-      /* ===================================================
-         DATABASE PRICE
-      =================================================== */
+      /* DATABASE PRICE */
 
-      let price = 0;
+      const price = matchedVariant
+        ? Number(matchedVariant.price || 0)
+        : Number(product.discountPrice || product.price || 0);
 
-      if (matchedVariant) {
-        price = Number(matchedVariant.price || 0);
-      } else {
-        price = Number(product.discountPrice || product.price || 0);
-      }
-
-      if (price <= 0) {
+      if (!Number.isFinite(price) || price <= 0) {
         return res.status(400).json({
           success: false,
           message: `${product.name} has an invalid price`,
         });
       }
 
-      /* ===================================================
-         IMAGE
-      =================================================== */
+      /* IMAGE */
 
       let image = "";
 
@@ -386,270 +345,148 @@ export const createOrder = async (req, res) => {
         image = product.images[0] || "";
       }
 
-      /* ===================================================
-         EXACT VARIANT ID
-      =================================================== */
+      /* VARIANT ID */
 
-      const variantId = matchedVariant ? getVariantId(matchedVariant) : null;
+      const variantId = matchedVariant
+        ? getVariantId(matchedVariant)
+        : null;
 
-      /* ===================================================
-         SKU
-      =================================================== */
+      /* SKU */
 
       const sku = matchedVariant
         ? normalizeValue(matchedVariant.sku)
         : normalizeValue(selectedVariant.sku);
 
-      /* ===================================================
-         PRODUCT SUBTOTAL
-      =================================================== */
+      /* SUBTOTAL */
 
       const itemSubtotal = price * quantity;
 
-      /* ===================================================
-         PUSH ORDER PRODUCT
-      =================================================== */
-
       orderProducts.push({
         product: product._id,
-
         name: product.name,
-
         price,
-
         quantity,
-
         color,
-
         ram,
-
         storage,
-
         variantId,
-
         sku,
-
         size: item.size || "",
-
         image,
-
         subtotal: itemSubtotal,
       });
 
-      /* ===================================================
-         SAVE EXACT STOCK UPDATE
-      =================================================== */
-
       stockUpdates.push({
         productId: String(product._id),
-
-        variantId: matchedVariant ? String(matchedVariant._id) : null,
-
+        variantId: matchedVariant
+          ? String(matchedVariant._id)
+          : null,
         quantity,
       });
     }
 
-    /* =====================================================
-       CALCULATE SUBTOTAL
-    ===================================================== */
+    /* CALCULATE SUBTOTAL */
 
-    const calculatedSubTotal = orderProducts.reduce((total, item) => {
-      return total + Number(item.price) * Number(item.quantity);
-    }, 0);
+    const calculatedSubTotal = orderProducts.reduce(
+      (total, item) =>
+        total + Number(item.price) * Number(item.quantity),
+      0,
+    );
 
-    /* =====================================================
-       DELIVERY CHARGE
-    ===================================================== */
+    /* DELIVERY CHARGE */
 
-    const safeDeliveryCharge = Math.max(0, Number(deliveryCharge || 0));
+    const requestedDeliveryCharge = Number(deliveryCharge || 0);
 
-    /* =====================================================
-       DISCOUNT
-    ===================================================== */
+    if (
+      !Number.isFinite(requestedDeliveryCharge) ||
+      requestedDeliveryCharge < 0
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid delivery charge",
+      });
+    }
+
+    const safeDeliveryCharge = requestedDeliveryCharge;
+
+    /* DISCOUNT */
+
+    const requestedDiscount = Number(discountAmount || 0);
+
+    if (!Number.isFinite(requestedDiscount) || requestedDiscount < 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid discount amount",
+      });
+    }
 
     const safeDiscountAmount = Math.min(
-      Math.max(Number(discountAmount || 0), 0),
+      requestedDiscount,
       calculatedSubTotal,
     );
 
-    /* =====================================================
-       TOTAL
-    ===================================================== */
+    /* TOTAL */
 
     const calculatedTotalAmount = Math.max(
       0,
-      calculatedSubTotal + safeDeliveryCharge - safeDiscountAmount,
+      calculatedSubTotal +
+        safeDeliveryCharge -
+        safeDiscountAmount,
     );
 
-    /* =====================================================
-       DEBUG STOCK DATA
-    ===================================================== */
-
-    console.log("=================================");
-
-    console.log("STOCK UPDATES:");
-
-    console.log(JSON.stringify(stockUpdates, null, 2));
-
-    console.log("=================================");
-
-    /* =====================================================
-       REDUCE STOCK
-
-       Variant থাকলে:
-       - Exact variant stock কমবে
-       - Main product stock কমবে
-
-       Variant না থাকলে:
-       - Main product stock কমবে
-    ===================================================== */
+    /* REDUCE STOCK */
 
     for (const stockItem of stockUpdates) {
-      /* ===================================================
-         VARIANT PRODUCT
-      =================================================== */
+      const productId = new mongoose.Types.ObjectId(
+        stockItem.productId,
+      );
+
+      const quantity = Number(stockItem.quantity);
 
       if (stockItem.variantId) {
-        const productId = new mongoose.Types.ObjectId(
-          String(stockItem.productId),
-        );
-
         const variantId = new mongoose.Types.ObjectId(
-          String(stockItem.variantId),
+          stockItem.variantId,
         );
-
-        const quantity = Number(stockItem.quantity);
-
-        console.log("=================================");
-
-        console.log("VARIANT STOCK UPDATE");
-
-        console.log("PRODUCT ID:", productId.toString());
-
-        console.log("VARIANT ID:", variantId.toString());
-
-        console.log("QUANTITY:", quantity);
-
-        /* =================================================
-           EXACT VARIANT STOCK UPDATE
-
-           এখানে arrayFilters ব্যবহার করা হচ্ছে।
-        ================================================= */
 
         const result = await Product.updateOne(
-          /* ---------------------------------------------
-               FILTER
-            --------------------------------------------- */
-
           {
             _id: productId,
-
-            // Product main stock check
-            stock: {
-              $gte: quantity,
-            },
-
-            // Exact variant check
+            stock: { $gte: quantity },
             variants: {
               $elemMatch: {
                 _id: variantId,
-
-                stock: {
-                  $gte: quantity,
-                },
+                stock: { $gte: quantity },
               },
             },
           },
-
-          /* ---------------------------------------------
-               UPDATE
-            --------------------------------------------- */
-
           {
             $inc: {
-              // Exact selected variant stock
               "variants.$[selectedVariant].stock": -quantity,
-
-              // Main product stock
               stock: -quantity,
             },
           },
-
-          /* ---------------------------------------------
-               ARRAY FILTER
-            --------------------------------------------- */
-
           {
             arrayFilters: [
               {
                 "selectedVariant._id": variantId,
-
-                "selectedVariant.stock": {
-                  $gte: quantity,
-                },
+                "selectedVariant.stock": { $gte: quantity },
               },
             ],
           },
         );
 
-        console.log("VARIANT STOCK UPDATE RESULT:", {
-          matchedCount: result.matchedCount,
-
-          modifiedCount: result.modifiedCount,
-        });
-
-        /* =================================================
-           STOCK UPDATE FAILED
-        ================================================= */
-
-        if (result.matchedCount === 0) {
+        if (result.modifiedCount !== 1) {
           return res.status(400).json({
             success: false,
-
-            message: `${productId}: selected variant stock is no longer available`,
+            message: "Selected variant stock is no longer available",
           });
         }
-
-        if (result.modifiedCount === 0) {
-          return res.status(400).json({
-            success: false,
-
-            message: "Failed to reduce selected variant stock",
-          });
-        }
-
-        console.log(
-          "Variant stock successfully reduced:",
-          variantId.toString(),
-        );
       } else {
-
-      /* ===================================================
-         NORMAL PRODUCT
-      =================================================== */
-        const productId = new mongoose.Types.ObjectId(
-          String(stockItem.productId),
-        );
-
-        const quantity = Number(stockItem.quantity);
-
-        console.log("=================================");
-
-        console.log("NORMAL PRODUCT STOCK UPDATE");
-
-        console.log("PRODUCT ID:", productId.toString());
-
-        console.log("QUANTITY:", quantity);
-
         const result = await Product.updateOne(
           {
             _id: productId,
-
-            stock: {
-              $gte: quantity,
-            },
+            stock: { $gte: quantity },
           },
-
           {
             $inc: {
               stock: -quantity,
@@ -657,100 +494,83 @@ export const createOrder = async (req, res) => {
           },
         );
 
-        console.log("NORMAL STOCK UPDATE RESULT:", {
-          matchedCount: result.matchedCount,
-
-          modifiedCount: result.modifiedCount,
-        });
-
-        if (result.matchedCount === 0) {
+        if (result.modifiedCount !== 1) {
           return res.status(400).json({
             success: false,
-
             message: "Product stock is no longer available",
           });
         }
-
-        if (result.modifiedCount === 0) {
-          return res.status(400).json({
-            success: false,
-
-            message: "Failed to reduce product stock",
-          });
-        }
-
-        console.log(
-          "Product stock successfully reduced:",
-          productId.toString(),
-        );
       }
     }
 
-    /* =====================================================
-       ORDER ID
-    ===================================================== */
+    /* CREATE ORDER */
 
     const orderId = `ORD-${Date.now()}`;
 
-    /* =====================================================
-       CREATE ORDER
-    ===================================================== */
-
     const order = await MainOrder.create({
       orderId,
-
       customer: customer._id,
-
       customerName: customerName.trim(),
-
-      email: email?.trim() || "",
-
+      email: cleanEmail,
       phone: cleanPhone,
-
       selectArea,
-
       deliveryAddress: deliveryAddress.trim(),
-
       note: note?.trim() || "",
-
       products: orderProducts,
-
       subTotal: calculatedSubTotal,
-
       deliveryCharge: safeDeliveryCharge,
-
       discountAmount: safeDiscountAmount,
-
       couponCode: couponCode?.trim().toUpperCase() || "",
-
       totalAmount: calculatedTotalAmount,
-
       paymentMethod: paymentMethod || "cash_on_delivery",
-
       paymentStatus: "unpaid",
-
       deliveryMethod: deliveryMethod || "courier_service",
-
       status: "pending",
-
-      termsAgreed: Boolean(termsAgreed),
-
+      termsAgreed: true,
       source: orderSource || "website",
     });
 
     /* =====================================================
-       SUCCESS
+       SEND PDF INVOICE EMAIL
+       Order already exists. Email failure must not turn
+       a successful order into a failed checkout.
     ===================================================== */
+
+    let invoiceEmailSent = false;
+
+    if (cleanEmail) {
+      try {
+        await sendInvoiceEmail(order);
+        invoiceEmailSent = true;
+
+        console.log(
+          "Invoice email sent successfully:",
+          order.orderId,
+          cleanEmail,
+        );
+      } catch (emailError) {
+        console.error(
+          "INVOICE EMAIL ERROR:",
+          order.orderId,
+          emailError.message,
+        );
+      }
+    } else {
+      console.log(
+        "Invoice email skipped: customer email is missing",
+        order.orderId,
+      );
+    }
+
+    /* SUCCESS RESPONSE */
 
     return res.status(201).json({
       success: true,
-
       message: "Order placed successfully",
-
       data: {
         orderId: order.orderId,
-
         order,
+        invoiceEmailSent,
       },
     });
   } catch (error) {
@@ -758,10 +578,11 @@ export const createOrder = async (req, res) => {
 
     return res.status(500).json({
       success: false,
-
       message: "Failed to create order",
-
-      error: process.env.NODE_ENV === "development" ? error.message : undefined,
+      error:
+        process.env.NODE_ENV === "development"
+          ? error.message
+          : undefined,
     });
   }
 };
@@ -778,15 +599,11 @@ export const getAllOrders = async (req, res) => {
         "products.product",
         "name price discountPrice stock images colors variants",
       )
-      .sort({
-        createdAt: -1,
-      });
+      .sort({ createdAt: -1 });
 
     return res.status(200).json({
       success: true,
-
       count: orders.length,
-
       data: orders,
     });
   } catch (error) {
@@ -794,14 +611,13 @@ export const getAllOrders = async (req, res) => {
 
     return res.status(500).json({
       success: false,
-
       message: "Failed to get orders",
     });
   }
 };
 
 /* =========================================================
-   GET SINGLE ORDER
+   GET SINGLE ORDER BY MONGODB ID
 ========================================================= */
 
 export const getOrderById = async (req, res) => {
@@ -838,7 +654,6 @@ export const getOrderById = async (req, res) => {
 
     return res.status(500).json({
       success: false,
-
       message: "Failed to get order",
     });
   }
@@ -852,9 +667,14 @@ export const getOrderByOrderId = async (req, res) => {
   try {
     const { orderId } = req.params;
 
-    const order = await MainOrder.findOne({
-      orderId,
-    })
+    if (!orderId) {
+      return res.status(400).json({
+        success: false,
+        message: "Order ID is required",
+      });
+    }
+
+    const order = await MainOrder.findOne({ orderId })
       .populate("customer", "name email phone address")
       .populate(
         "products.product",
@@ -877,7 +697,6 @@ export const getOrderByOrderId = async (req, res) => {
 
     return res.status(500).json({
       success: false,
-
       message: "Failed to get order",
     });
   }
@@ -890,7 +709,6 @@ export const getOrderByOrderId = async (req, res) => {
 export const updateOrderStatus = async (req, res) => {
   try {
     const { id } = req.params;
-
     const { status } = req.body;
 
     const allowedStatuses = [
@@ -908,16 +726,13 @@ export const updateOrderStatus = async (req, res) => {
     if (!allowedStatuses.includes(status)) {
       return res.status(400).json({
         success: false,
-
         message: "Invalid order status",
       });
     }
 
     const order = await MainOrder.findByIdAndUpdate(
       id,
-      {
-        status,
-      },
+      { status },
       {
         new: true,
         runValidators: true,
@@ -927,16 +742,13 @@ export const updateOrderStatus = async (req, res) => {
     if (!order) {
       return res.status(404).json({
         success: false,
-
         message: "Order not found",
       });
     }
 
     return res.status(200).json({
       success: true,
-
       message: "Order status updated successfully",
-
       data: order,
     });
   } catch (error) {
@@ -944,7 +756,6 @@ export const updateOrderStatus = async (req, res) => {
 
     return res.status(500).json({
       success: false,
-
       message: "Failed to update order status",
     });
   }
@@ -957,24 +768,24 @@ export const updateOrderStatus = async (req, res) => {
 export const updatePaymentStatus = async (req, res) => {
   try {
     const { id } = req.params;
-
     const { paymentStatus } = req.body;
 
-    const allowedStatuses = ["unpaid", "partially_paid", "paid"];
+    const allowedStatuses = [
+      "unpaid",
+      "partially_paid",
+      "paid",
+    ];
 
     if (!allowedStatuses.includes(paymentStatus)) {
       return res.status(400).json({
         success: false,
-
         message: "Invalid payment status",
       });
     }
 
     const order = await MainOrder.findByIdAndUpdate(
       id,
-      {
-        paymentStatus,
-      },
+      { paymentStatus },
       {
         new: true,
         runValidators: true,
@@ -984,16 +795,13 @@ export const updatePaymentStatus = async (req, res) => {
     if (!order) {
       return res.status(404).json({
         success: false,
-
         message: "Order not found",
       });
     }
 
     return res.status(200).json({
       success: true,
-
       message: "Payment status updated successfully",
-
       data: order,
     });
   } catch (error) {
@@ -1001,17 +809,7 @@ export const updatePaymentStatus = async (req, res) => {
 
     return res.status(500).json({
       success: false,
-
       message: "Failed to update payment status",
     });
   }
 };
-
-
-
-
-
-
-
-// ১. গেট অল অর্ডার (ফিল্টারিং, সার্চ এবং পেজিনেশন সহ)
-

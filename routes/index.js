@@ -21,7 +21,7 @@ import {
   getFullCategoryTree,
   updateCategoryBanner,
 } from "../Controller/Catgorihandelar.js";
-import {  createOrder  } from "../Controller/CREATODER.js";
+import {  createOrder, getOrderByOrderId  } from "../Controller/CREATODER.js";
 import { OderActivity } from "../Controller/ShowOderactivity.js";
 import { getDashboardSummary } from "../Controller/Deshbord.js";
 import { bulkUpdateOrders, deleteOrder, getOrders, updateOrder } from "../Controller/OrderMange.js";
@@ -75,6 +75,7 @@ router.post("/verify-email-otp", verifyEmailOtp);
 router.post("/resend-email-otp", resendEmailOtp);
 router.post("/login", login);
 router.post("/verify-login-otp", verifyLoginOtp);
+router.get("/order-id/:orderId", getOrderByOrderId);
 router.get(
   "/me",
   verifyToken,

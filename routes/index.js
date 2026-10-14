@@ -7,6 +7,7 @@ import {
   getProductById,
   getProducts,
   updateProduct,
+  deleteProduct
 } from "../Controller/addproduct.js";
 import {
   receiveWebhook,
@@ -82,7 +83,7 @@ router.get(
   authorizeRoles("customer", "admin"),
   getMyProfile
 );
-
+router.delete("/:id", deleteProduct);
 router.get("/:id", getProductById);
 router.put(
   "/updateproduct/:id",

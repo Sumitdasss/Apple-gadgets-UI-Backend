@@ -591,28 +591,47 @@ export const createOrder = async (req, res) => {
    GET ALL ORDERS
 ========================================================= */
 
-export const getAllOrders = async (req, res) => {
+export const getAllOrders = async (req, res, next) => {
   try {
-    const orders = await MainOrder.find()
-      .populate("customer", "name email phone address")
-      .populate(
-        "products.product",
-        "name price discountPrice stock images colors variants",
-      )
-      .sort({ createdAt: -1 });
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const limit = Math.min(
+      100,
+      Math.max(1, Number(req.query.limit) || 20)
+    );
+
+    const filter = {};
+
+    if (req.query.status) {
+      filter.status = req.query.status;
+    }
+
+    const [orders, total] = await Promise.all([
+      MainOrder.find(filter)
+        .select(
+          "orderId customerName phone status source totalAmount createdAt"
+        )
+        .sort({ createdAt: -1, _id: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean(),
+
+      MainOrder.countDocuments(filter),
+    ]);
 
     return res.status(200).json({
       success: true,
-      count: orders.length,
-      data: orders,
+      data: {
+        orders,
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit),
+        },
+      },
     });
   } catch (error) {
-    console.error("GET ALL ORDERS ERROR:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: "Failed to get orders",
-    });
+    next(error);
   }
 };
 
@@ -813,3 +832,114 @@ export const updatePaymentStatus = async (req, res) => {
     });
   }
 };
+
+
+
+
+
+// GET /api/orders/:orderId
+export const getOrderDetails = async (req, res, next) => {
+  try {
+    const { orderId } = req.params;
+
+    let order = null;
+
+    // Search by MongoDB _id
+    if (mongoose.Types.ObjectId.isValid(orderId)) {
+      order = await MainOrder.findById(orderId).lean();
+    }
+
+    // If not found, search by custom orderId
+    if (!order) {
+      order = await MainOrder.findOne({ orderId }).lean();
+    }
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Order details fetched successfully",
+      data: order,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+// GET /api/orders/:orderId/navigation
+export const getOrderNavigation = async (req, res, next) => {
+  try {
+    const { orderId } = req.params;
+
+    let currentOrder = null;
+
+    // MongoDB _id দিয়ে খোঁজা
+    if (mongoose.Types.ObjectId.isValid(orderId)) {
+      currentOrder = await MainOrder.findById(orderId)
+        .select("_id orderId createdAt")
+        .lean();
+    }
+
+    // Custom orderId দিয়ে খোঁজা
+    if (!currentOrder) {
+      currentOrder = await MainOrder.findOne({ orderId })
+        .select("_id orderId createdAt")
+        .lean();
+    }
+
+    if (!currentOrder) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found",
+      });
+    }
+
+    const currentDate = currentOrder.createdAt ?? new Date(0);
+
+    const [previousOrder, nextOrder] = await Promise.all([
+      MainOrder.findOne({
+        $or: [
+          { createdAt: { $lt: currentDate } },
+          {
+            createdAt: currentDate,
+            _id: { $lt: currentOrder._id },
+          },
+        ],
+      })
+        .sort({ createdAt: -1, _id: -1 })
+        .select("_id orderId createdAt")
+        .lean(),
+
+      MainOrder.findOne({
+        $or: [
+          { createdAt: { $gt: currentDate } },
+          {
+            createdAt: currentDate,
+            _id: { $gt: currentOrder._id },
+          },
+        ],
+      })
+        .sort({ createdAt: 1, _id: 1 })
+        .select("_id orderId createdAt")
+        .lean(),
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        previousOrderId: previousOrder?._id?.toString() ?? null,
+        nextOrderId: nextOrder?._id?.toString() ?? null,
+        previousOrder,
+        nextOrder,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+// GET /api/orders
+// Order list for the All Orders page

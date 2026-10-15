@@ -22,7 +22,7 @@ import {
   getFullCategoryTree,
   updateCategoryBanner,
 } from "../Controller/Catgorihandelar.js";
-import {  createOrder, getOrderByOrderId  } from "../Controller/CREATODER.js";
+import {  createOrder, getAllOrders, getOrderByOrderId, getOrderDetails, getOrderNavigation  } from "../Controller/CREATODER.js";
 import { OderActivity } from "../Controller/ShowOderactivity.js";
 import { getDashboardSummary } from "../Controller/Deshbord.js";
 import { bulkUpdateOrders, deleteOrder, getOrders, updateOrder } from "../Controller/OrderMange.js";
@@ -67,6 +67,13 @@ router.get("/order", getOrders);
 router.patch("/bulk-update", bulkUpdateOrders);
 router.put("/orders/:id", updateOrder);
 router.delete("/orders/:id", deleteOrder);
+router.get("/Allorders", getAllOrders);
+
+// GET /api/orders/:orderId/navigation
+router.get("/:orderId/navigation", getOrderNavigation);
+
+// GET /api/orders/:orderId
+router.get("/:orderId", getOrderDetails);
 router.patch(
   "/:type/:id/banner",
   updateCategoryBanner

@@ -70,10 +70,7 @@ router.delete("/orders/:id", deleteOrder);
 router.get("/Allorders", getAllOrders);
 
 // GET /api/orders/:orderId/navigation
-router.get("/:orderId/navigation", getOrderNavigation);
 
-// GET /api/orders/:orderId
-router.get("/:orderId", getOrderDetails);
 router.patch(
   "/:type/:id/banner",
   updateCategoryBanner
@@ -106,7 +103,10 @@ router.put(
   ]),
   updateProduct,
 );
+router.get("/:orderId/navigation", getOrderNavigation);
 
+// GET /api/orders/:orderId
+router.get("/getOderdetails/:orderId", getOrderDetails);
 
 
 

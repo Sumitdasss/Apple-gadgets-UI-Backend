@@ -9,17 +9,12 @@ import {
 } from "../Model/Catagori.js";
 
 /* =========================================================
-   CONFIGURATION
+   CONFIGURATION + RESPONSE CACHE
 ========================================================= */
 
 const CACHE_TTL = 15_000;
 const MAX_CACHE_ITEMS = 200;
-
 const responseCache = new Map();
-
-/* =========================================================
-   CACHE HELPERS
-========================================================= */
 
 const getCached = (key) => {
   const cached = responseCache.get(key);
@@ -31,7 +26,7 @@ const getCached = (key) => {
     return null;
   }
 
-  // Refresh insertion order for simple LRU behavior
+  // Refresh insertion order (simple LRU).
   responseCache.delete(key);
   responseCache.set(key, cached);
 
@@ -39,9 +34,7 @@ const getCached = (key) => {
 };
 
 const setCached = (key, data) => {
-  if (responseCache.has(key)) {
-    responseCache.delete(key);
-  }
+  responseCache.delete(key);
 
   while (responseCache.size >= MAX_CACHE_ITEMS) {
     const oldestKey = responseCache.keys().next().value;
@@ -55,17 +48,15 @@ const setCached = (key, data) => {
   });
 };
 
-export const clearProductCache = () => {
-  responseCache.clear();
-};
+export const clearProductCache = () => responseCache.clear();
 
-const sendCachedResponse = (req, res, next) => {
+export const productCache = (req, res, next) => {
   if (req.method !== "GET") return next();
 
   const key = `products:${req.originalUrl}`;
   const cached = getCached(key);
 
-  if (cached) {
+  if (cached !== null) {
     res.set("X-Cache", "HIT");
     return res.status(200).json(cached);
   }
@@ -81,15 +72,44 @@ const sendCachedResponse = (req, res, next) => {
     return originalJson(data);
   };
 
-  next();
+  return next();
 };
-
-// Use this middleware on product GET routes.
-export const productCache = sendCachedResponse;
 
 /* =========================================================
    COMMON HELPERS
 ========================================================= */
+
+const cleanString = (value) =>
+  value === undefined || value === null ? "" : String(value).trim();
+
+const toBoolean = (value) =>
+  value === true ||
+  value === "true" ||
+  value === 1 ||
+  value === "1";
+
+const isValidObjectId = (id) =>
+  typeof id === "string" && mongoose.Types.ObjectId.isValid(id);
+
+const uniqueStrings = (items = []) => [
+  ...new Set(
+    (Array.isArray(items) ? items : [])
+      .filter((item) => item !== undefined && item !== null)
+      .map((item) => String(item).trim())
+      .filter(Boolean),
+  ),
+];
+
+const uniqueIds = (items = []) => [
+  ...new Map(
+    (Array.isArray(items) ? items : [])
+      .filter(Boolean)
+      .map((id) => [String(id), id]),
+  ).values(),
+];
+
+const escapeRegex = (value) =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const parseJSON = (value, fallback = []) => {
   if (value === undefined || value === null || value === "") {
@@ -105,45 +125,21 @@ const parseJSON = (value, fallback = []) => {
   }
 };
 
-const isValidObjectId = (id) =>
-  typeof id === "string" && mongoose.Types.ObjectId.isValid(id);
+const parseArrayField = (body, field, fallback = []) => {
+  const value = parseJSON(body[field], fallback);
 
-const cleanString = (value) =>
-  value === undefined || value === null ? "" : String(value).trim();
-
-const toBoolean = (value) =>
-  value === true || value === "true" || value === 1 || value === "1";
-
-const uniqueStrings = (items = []) => [
-  ...new Set(
-    items
-      .filter((item) => item !== undefined && item !== null)
-      .map((item) => String(item).trim())
-      .filter(Boolean),
-  ),
-];
-
-const uniqueIds = (items = []) => [
-  ...new Map(items.filter(Boolean).map((id) => [String(id), id])).values(),
-];
-
-const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-const parseArrayFields = (body, fields) => {
-  const result = {};
-
-  for (const field of fields) {
-    result[field] = parseJSON(body[field], []);
-
-    if (!Array.isArray(result[field])) {
-      throw new Error(`${field} must be an array`);
-    }
+  if (!Array.isArray(value)) {
+    throw new Error(`${field} must be an array`);
   }
 
-  return result;
+  return value;
 };
 
-const parseNumber = (value, field, { min = 0, max = Infinity } = {}) => {
+const parseNumber = (
+  value,
+  field,
+  { min = 0, max = Infinity } = {},
+) => {
   if (value === undefined || value === null || value === "") {
     throw new Error(`${field} is required`);
   }
@@ -157,11 +153,14 @@ const parseNumber = (value, field, { min = 0, max = Infinity } = {}) => {
   return number;
 };
 
+const hasOwn = (object, key) =>
+  Object.prototype.hasOwnProperty.call(object, key);
+
 const effectivePriceExpression = {
   $cond: [
     {
       $and: [
-        { $ne: ["$discountPrice", null] },
+        { $ne: [{ $ifNull: ["$discountPrice", null] }, null] },
         { $lt: ["$discountPrice", "$price"] },
         { $gte: ["$discountPrice", 0] },
       ],
@@ -184,7 +183,10 @@ const sortOptions = {
 ========================================================= */
 
 const validateCategories = async (body) => {
-  const { category, subCategory, childCategory, subChildCategory } = body;
+  const category = cleanString(body.category);
+  const subCategory = cleanString(body.subCategory);
+  const childCategory = cleanString(body.childCategory);
+  const subChildCategory = cleanString(body.subChildCategory);
 
   if (!isValidObjectId(category)) {
     throw new Error("Valid main category is required");
@@ -203,7 +205,7 @@ const validateCategories = async (body) => {
 
   if (subCategory) {
     if (!isValidObjectId(subCategory)) {
-      throw new Error("Invalid sub category");
+      throw new Error("Invalid sub category ID");
     }
 
     const sub = await SubCategory.findOne({
@@ -214,14 +216,16 @@ const validateCategories = async (body) => {
       .select("_id")
       .lean();
 
-    if (!sub) {
-      throw new Error("Invalid sub category parent");
-    }
+    if (!sub) throw new Error("Invalid sub category parent");
   }
 
   if (childCategory) {
     if (!subCategory) {
       throw new Error("Sub category is required for child category");
+    }
+
+    if (!isValidObjectId(childCategory)) {
+      throw new Error("Invalid child category ID");
     }
 
     const child = await ChildCategory.findOne({
@@ -233,14 +237,16 @@ const validateCategories = async (body) => {
       .select("_id")
       .lean();
 
-    if (!child) {
-      throw new Error("Invalid child category parent");
-    }
+    if (!child) throw new Error("Invalid child category parent");
   }
 
   if (subChildCategory) {
     if (!childCategory) {
       throw new Error("Child category is required for sub-child category");
+    }
+
+    if (!isValidObjectId(subChildCategory)) {
+      throw new Error("Invalid sub-child category ID");
     }
 
     const subChild = await SubChildCategory.findOne({
@@ -253,9 +259,7 @@ const validateCategories = async (body) => {
       .select("_id")
       .lean();
 
-    if (!subChild) {
-      throw new Error("Invalid sub-child category parent");
-    }
+    if (!subChild) throw new Error("Invalid sub-child category parent");
   }
 
   return {
@@ -271,9 +275,13 @@ const validateCategories = async (body) => {
 ========================================================= */
 
 const normalizeVariants = (variants) =>
-  variants.map((variant) => {
-    if (!variant || typeof variant !== "object" || Array.isArray(variant)) {
-      throw new Error("Each variant must be an object");
+  variants.map((variant, index) => {
+    if (
+      !variant ||
+      typeof variant !== "object" ||
+      Array.isArray(variant)
+    ) {
+      throw new Error(`Variant ${index + 1} must be an object`);
     }
 
     const result = { ...variant };
@@ -287,16 +295,21 @@ const normalizeVariants = (variants) =>
     }
 
     if (result.ram != null) result.ram = cleanString(result.ram);
+
     if (result.storage != null) {
       result.storage = cleanString(result.storage);
     }
-    if (result.sku != null) result.sku = cleanString(result.sku);
+
+    if (result.sku != null) {
+      result.sku = cleanString(result.sku);
+    }
 
     if (result.color && typeof result.color === "object") {
       result.color = {
+        ...result.color,
         name: cleanString(result.color.name),
-        code: result.color.code || "#000000",
-        image: result.color.image || "",
+        code: cleanString(result.color.code) || "#000000",
+        image: cleanString(result.color.image),
       };
     }
 
@@ -304,83 +317,151 @@ const normalizeVariants = (variants) =>
   });
 
 /* =========================================================
-   SHARED PRODUCT SAVE HANDLER
+   SHARED ADD / UPDATE HANDLER
 ========================================================= */
 
 const saveProduct = async (req, res, isUpdate = false) => {
   try {
-    const existingProduct = isUpdate
-      ? await (async () => {
-          const { id } = req.params;
+    let existingProduct = null;
 
-          if (!isValidObjectId(id)) {
-            throw new Error("Valid product ID is required");
-          }
+    if (isUpdate) {
+      const { id } = req.params;
 
-          const product = await Product.findById(id);
+      if (!isValidObjectId(id)) {
+        return res.status(400).json({
+          success: false,
+          message: "Valid product ID is required",
+        });
+      }
 
-          if (!product) {
-            const error = new Error("Product not found");
-            error.statusCode = 404;
-            throw error;
-          }
+      existingProduct = await Product.findById(id);
 
-          return product;
-        })()
-      : null;
+      if (!existingProduct) {
+        return res.status(404).json({
+          success: false,
+          message: "Product not found",
+        });
+      }
+    }
 
-    const body = req.body;
+    const body = req.body || {};
 
-    const name = cleanString(body.name);
-    const slug = cleanString(body.slug);
+    // Preserve existing scalar values when a field is omitted on update.
+    const name = cleanString(
+      hasOwn(body, "name") ? body.name : existingProduct?.name,
+    );
+
+    const slug = cleanString(
+      hasOwn(body, "slug") ? body.slug : existingProduct?.slug,
+    );
 
     if (!name) throw new Error("Product name is required");
     if (!slug) throw new Error("Product slug is required");
 
-    const price = parseNumber(body.price, "price");
+    const price = parseNumber(
+      hasOwn(body, "price") ? body.price : existingProduct?.price,
+      "price",
+    );
 
-    const stock = parseNumber(body.stock, "stock");
+    const stock = parseNumber(
+      hasOwn(body, "stock") ? body.stock : existingProduct?.stock,
+      "stock",
+    );
+
+    const rawDiscountPrice = hasOwn(body, "discountPrice")
+      ? body.discountPrice
+      : existingProduct?.discountPrice;
 
     const discountPrice =
-      body.discountPrice === undefined ||
-      body.discountPrice === null ||
-      body.discountPrice === ""
+      rawDiscountPrice === undefined ||
+      rawDiscountPrice === null ||
+      rawDiscountPrice === ""
         ? null
-        : parseNumber(body.discountPrice, "discount price");
+        : parseNumber(rawDiscountPrice, "discount price");
 
-    if (discountPrice !== null && discountPrice >= price && price > 0) {
+    if (discountPrice !== null && discountPrice >= price) {
       throw new Error("Discount price must be lower than product price");
     }
 
-    const rating =
-      body.rating === undefined || body.rating === ""
-        ? 0
-        : parseNumber(body.rating, "rating", { min: 0, max: 5 });
+    const rating = parseNumber(
+      hasOwn(body, "rating")
+        ? body.rating
+        : existingProduct?.rating ?? 0,
+      "rating",
+      { min: 0, max: 5 },
+    );
 
-    const arrays = parseArrayFields(body, [
+    const colorsInput = parseArrayField(
+      body,
       "colors",
+      existingProduct?.colors?.map((item) =>
+        item?.toObject ? item.toObject() : item,
+      ) || [],
+    );
+
+    const sizesInput = parseArrayField(
+      body,
       "sizes",
+      existingProduct?.sizes || [],
+    );
+
+    const ramInput = parseArrayField(
+      body,
       "ram",
+      existingProduct?.ram || [],
+    );
+
+    const specifications = parseArrayField(
+      body,
       "specifications",
+      existingProduct?.specifications || [],
+    );
+
+    const variantsInput = parseArrayField(
+      body,
       "variants",
+      existingProduct?.variants?.map((item) =>
+        item?.toObject ? item.toObject() : item,
+      ) || [],
+    );
+
+    const additionalCategoriesInput = parseArrayField(
+      body,
       "additionalCategories",
-    ]);
+      existingProduct?.additionalCategories || [],
+    );
 
-    const parsedColors = arrays.colors;
-    const parsedSizes = arrays.sizes;
-    const parsedRam = arrays.ram;
-    const parsedSpecifications = arrays.specifications;
-    const parsedVariants = normalizeVariants(arrays.variants);
+    const variants = normalizeVariants(variantsInput);
 
-    const additionalCategories = arrays.additionalCategories;
-
-    if (additionalCategories.some((id) => !isValidObjectId(id))) {
+    if (
+      additionalCategoriesInput.some(
+        (id) => !isValidObjectId(String(id)),
+      )
+    ) {
       throw new Error("Invalid additional category ID");
     }
 
-    const cleanAdditionalCategories = uniqueIds(additionalCategories);
+    const additionalCategories = uniqueIds(additionalCategoriesInput);
 
-    const categories = await validateCategories(body);
+    const categoryBody = {
+      category: hasOwn(body, "category")
+        ? body.category
+        : existingProduct?.category?.toString(),
+
+      subCategory: hasOwn(body, "subCategory")
+        ? body.subCategory
+        : existingProduct?.subCategory?.toString() || "",
+
+      childCategory: hasOwn(body, "childCategory")
+        ? body.childCategory
+        : existingProduct?.childCategory?.toString() || "",
+
+      subChildCategory: hasOwn(body, "subChildCategory")
+        ? body.subChildCategory
+        : existingProduct?.subChildCategory?.toString() || "",
+    };
+
+    const categories = await validateCategories(categoryBody);
 
     const duplicate = await Product.exists({
       slug,
@@ -392,112 +473,153 @@ const saveProduct = async (req, res, isUpdate = false) => {
     }
 
     const files = req.files || {};
-    const newImages = (files.images || []).map((file) => file.path);
-    const newColorImages = (files.colorImages || []).map((file) => file.path);
 
-    const existingImages = isUpdate
-      ? parseJSON(body.existingImages, existingProduct.images || [])
+    const newImages = (files.images || []).map((file) => file.path);
+
+    const newColorImages = (files.colorImages || []).map(
+      (file) => file.path,
+    );
+
+    const oldImages = Array.isArray(existingProduct?.images)
+      ? existingProduct.images
       : [];
 
-    if (!Array.isArray(existingImages)) {
+    const submittedExistingImages = parseJSON(
+      body.existingImages,
+      oldImages,
+    );
+
+    if (!Array.isArray(submittedExistingImages)) {
       throw new Error("Existing images must be an array");
     }
 
-    // Keep only previously stored image URLs belonging to this product.
-    const oldImages = existingProduct?.images || [];
-    const retainedImages = existingImages.filter(
+    // Only retain URLs already belonging to this product.
+    const retainedImages = submittedExistingImages.filter(
       (image) => typeof image === "string" && oldImages.includes(image),
     );
 
-    const images = isUpdate ? [...retainedImages, ...newImages] : newImages;
+    const images = isUpdate
+      ? [...retainedImages, ...newImages]
+      : newImages;
 
     if (images.length === 0) {
       throw new Error("At least one product image is required");
     }
 
+    // Match uploaded color images to colors in the submitted order.
     let colorImageIndex = 0;
 
-    const colors = parsedColors.map((color) => {
-      let image = color?.existingImage || color?.image || "";
+    const colors = colorsInput.map((color) => {
+      const safeColor =
+        color && typeof color === "object" && !Array.isArray(color)
+          ? color
+          : { name: cleanString(color) };
 
-      if (
-        color?.hasNewImage ||
-        color?.imageFile ||
-        (!image && newColorImages[colorImageIndex])
-      ) {
-        if (newColorImages[colorImageIndex]) {
-          image = newColorImages[colorImageIndex];
-          colorImageIndex += 1;
-        }
+      let image = cleanString(
+        safeColor.existingImage || safeColor.image || "",
+      );
+
+      const needsNewImage =
+        toBoolean(safeColor.hasNewImage) ||
+        toBoolean(safeColor.imageFile) ||
+        !image;
+
+      if (needsNewImage && newColorImages[colorImageIndex]) {
+        image = newColorImages[colorImageIndex];
+        colorImageIndex += 1;
       }
 
       return {
-        name: cleanString(color?.name),
-        code: color?.code || "#000000",
+        ...safeColor,
+        name: cleanString(safeColor.name),
+        code: cleanString(safeColor.code) || "#000000",
         image,
       };
     });
 
-    const discountPercentage =
+    const calculatedDiscountPercentage =
       discountPrice !== null && price > 0
         ? Number((((price - discountPrice) / price) * 100).toFixed(2))
         : 0;
 
-    const manuallyEnteredDiscount =
-      body.discountPercentage !== undefined && body.discountPercentage !== ""
+    const discountPercentage =
+      hasOwn(body, "discountPercentage") &&
+      body.discountPercentage !== ""
         ? parseNumber(body.discountPercentage, "discount percentage", {
             min: 0,
             max: 100,
           })
-        : discountPercentage;
+        : calculatedDiscountPercentage;
 
     const productData = {
       name,
       slug,
-      description: cleanString(body.description),
-      shortDescription: cleanString(body.shortDescription),
+
+      description: cleanString(
+        hasOwn(body, "description")
+          ? body.description
+          : existingProduct?.description,
+      ),
+
+      shortDescription: cleanString(
+        hasOwn(body, "shortDescription")
+          ? body.shortDescription
+          : existingProduct?.shortDescription,
+      ),
 
       ...categories,
-      additionalCategories: cleanAdditionalCategories,
+      additionalCategories,
 
-      brand: cleanString(body.brand),
+      brand: cleanString(
+        hasOwn(body, "brand") ? body.brand : existingProduct?.brand,
+      ),
 
       price,
       discountPrice,
-      discountPercentage: manuallyEnteredDiscount,
+      discountPercentage,
 
       stock,
-      sku: cleanString(body.sku),
+
+      sku: cleanString(
+        hasOwn(body, "sku") ? body.sku : existingProduct?.sku,
+      ),
 
       colors,
-      sizes: uniqueStrings(parsedSizes),
-      ram: uniqueStrings(parsedRam),
-      specifications: parsedSpecifications,
-      variants: parsedVariants,
+      sizes: uniqueStrings(sizesInput),
+      ram: uniqueStrings(ramInput),
+      specifications,
+      variants,
 
       rating,
 
-      metaTitle: cleanString(body.metaTitle),
-      metaDescription: cleanString(body.metaDescription),
+      metaTitle: cleanString(
+        hasOwn(body, "metaTitle")
+          ? body.metaTitle
+          : existingProduct?.metaTitle,
+      ),
+
+      metaDescription: cleanString(
+        hasOwn(body, "metaDescription")
+          ? body.metaDescription
+          : existingProduct?.metaDescription,
+      ),
 
       images,
     };
 
-    if (!isUpdate || body.isActive !== undefined) {
-      productData.isActive =
-        body.isActive === undefined ? true : toBoolean(body.isActive);
-    }
+    const booleanFields = [
+      ["isActive", true],
+      ["isFeatured", false],
+      ["isNew", false],
+      ["isBestSeller", false],
+    ];
 
-    if (!isUpdate || body.isFeatured !== undefined) {
-      productData.isFeatured = toBoolean(body.isFeatured);
-    }
-
-    if (!isUpdate || body.isNew !== undefined) {
-      productData.isNew = toBoolean(body.isNew);
-    }
-
-    if (!isUpdate || body.isBestSeller !== undefined) {
-      productData.isBestSeller = toBoolean(body.isBestSeller);
+    for (const [field, defaultValue] of booleanFields) {
+      if (!isUpdate || hasOwn(body, field)) {
+        productData[field] = hasOwn(body, field)
+          ? toBoolean(body[field])
+          : defaultValue;
+      }
     }
 
     let product;
@@ -563,16 +685,18 @@ const saveProduct = async (req, res, isUpdate = false) => {
    ADD PRODUCT
 ========================================================= */
 
-export const addProduct = (req, res) => saveProduct(req, res, false);
+export const addProduct = (req, res) =>
+  saveProduct(req, res, false);
 
 /* =========================================================
    UPDATE PRODUCT
 ========================================================= */
 
-export const updateProduct = (req, res) => saveProduct(req, res, true);
+export const updateProduct = (req, res) =>
+  saveProduct(req, res, true);
 
 /* =========================================================
-   CATEGORY LOOKUP
+   CATEGORY LOOKUP HELPERS
 ========================================================= */
 
 const findCategoryBySlug = async (slug) => {
@@ -585,11 +709,17 @@ const findCategoryBySlug = async (slug) => {
 
   for (const item of models) {
     const category = await item.model
-      .findOne({ slug, isActive: { $ne: false } })
+      .findOne({
+        slug,
+        isActive: { $ne: false },
+      })
       .lean();
 
     if (category) {
-      return { category, level: item.level };
+      return {
+        category,
+        level: item.level,
+      };
     }
   }
 
@@ -628,9 +758,7 @@ const getCategoryIds = async (category, level) => {
       ...children.map((item) => item._id),
       ...subChildren.map((item) => item._id),
     );
-  }
-
-  if (level === "sub") {
+  } else if (level === "sub") {
     const [children, subChildren] = await Promise.all([
       ChildCategory.find({
         subCategory: category._id,
@@ -651,9 +779,7 @@ const getCategoryIds = async (category, level) => {
       ...children.map((item) => item._id),
       ...subChildren.map((item) => item._id),
     );
-  }
-
-  if (level === "child") {
+  } else if (level === "child") {
     const subChildren = await SubChildCategory.find({
       childCategory: category._id,
       isActive: { $ne: false },
@@ -668,22 +794,28 @@ const getCategoryIds = async (category, level) => {
 };
 
 /* =========================================================
-   GET ALL PRODUCTS
+   GET ALL PRODUCTS WITH CATEGORY / FILTERS / PAGINATION
+
    GET /products/getALLproducts?page=1&limit=12
 ========================================================= */
 
 export const getAllProduct = async (req, res) => {
   try {
-    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const page = Math.max(
+      1,
+      Number.parseInt(req.query.page, 10) || 1,
+    );
+
     const limit = Math.min(
       48,
-      Math.max(1, parseInt(req.query.limit, 10) || 12),
+      Math.max(1, Number.parseInt(req.query.limit, 10) || 12),
     );
+
     const skip = (page - 1) * limit;
 
     const categoryQuery = cleanString(req.query.category).toLowerCase();
     const brandQuery = cleanString(req.query.brand);
-    const stockQuery = cleanString(req.query.stock);
+    const stockQuery = cleanString(req.query.stock).toLowerCase();
     const sortQuery = cleanString(req.query.sort) || "newest";
 
     const filter = {};
@@ -708,7 +840,10 @@ export const getAllProduct = async (req, res) => {
             storage: [],
             processors: [],
             colors: [],
-            price: { min: 0, max: 0 },
+            price: {
+              min: 0,
+              max: 0,
+            },
           },
         });
       }
@@ -718,21 +853,24 @@ export const getAllProduct = async (req, res) => {
 
       if (level === "main") {
         filter.$or = [
-          { category: category._id },
-          { additionalCategories: category._id },
+          { category: { $in: ids } },
+          { subCategory: { $in: ids } },
+          { childCategory: { $in: ids } },
+          { subChildCategory: { $in: ids } },
+          { additionalCategories: { $in: ids } },
         ];
       } else if (level === "sub") {
         filter.$or = [
           { subCategory: category._id },
           { childCategory: { $in: ids } },
           { subChildCategory: { $in: ids } },
-          { additionalCategories: category._id },
+          { additionalCategories: { $in: ids } },
         ];
       } else if (level === "child") {
         filter.$or = [
           { childCategory: category._id },
           { subChildCategory: { $in: ids } },
-          { additionalCategories: category._id },
+          { additionalCategories: { $in: ids } },
         ];
       } else {
         filter.$or = [
@@ -751,12 +889,19 @@ export const getAllProduct = async (req, res) => {
       };
     }
 
-    if (req.query.minPrice !== undefined || req.query.maxPrice !== undefined) {
+    if (
+      req.query.minPrice !== undefined ||
+      req.query.maxPrice !== undefined
+    ) {
       const min =
-        req.query.minPrice === undefined ? null : Number(req.query.minPrice);
+        req.query.minPrice === undefined
+          ? null
+          : Number(req.query.minPrice);
 
       const max =
-        req.query.maxPrice === undefined ? null : Number(req.query.maxPrice);
+        req.query.maxPrice === undefined
+          ? null
+          : Number(req.query.maxPrice);
 
       if (
         (min !== null && (!Number.isFinite(min) || min < 0)) ||
@@ -772,18 +917,29 @@ export const getAllProduct = async (req, res) => {
       const conditions = [];
 
       if (min !== null) {
-        conditions.push({ $gte: [effectivePriceExpression, min] });
+        conditions.push({
+          $gte: [effectivePriceExpression, min],
+        });
       }
 
       if (max !== null) {
-        conditions.push({ $lte: [effectivePriceExpression, max] });
+        conditions.push({
+          $lte: [effectivePriceExpression, max],
+        });
       }
 
-      filter.$expr = { $and: conditions };
+      filter.$expr = {
+        $and: conditions,
+      };
     }
 
-    if (stockQuery === "in-stock") filter.stock = { $gt: 0 };
-    if (stockQuery === "out-of-stock") filter.stock = { $lte: 0 };
+    if (stockQuery === "in-stock") {
+      filter.stock = { $gt: 0 };
+    }
+
+    if (stockQuery === "out-of-stock") {
+      filter.stock = { $lte: 0 };
+    }
 
     const sortOption = sortOptions[sortQuery] || sortOptions.newest;
 
@@ -802,7 +958,7 @@ export const getAllProduct = async (req, res) => {
 
       Product.countDocuments(filter),
 
-      // Build filter options from all matching products, not just this page.
+      // Build filter options from all matching products.
       Product.aggregate([
         { $match: filter },
         {
@@ -826,6 +982,7 @@ export const getAllProduct = async (req, res) => {
             _id: null,
             brands: { $addToSet: "$brand" },
             series: { $addToSet: "$series" },
+
             displaySizes: {
               $addToSet: {
                 $ifNull: [
@@ -834,6 +991,7 @@ export const getAllProduct = async (req, res) => {
                 ],
               },
             },
+
             processors: { $addToSet: "$processor" },
             colors: { $push: "$colors" },
             variants: { $push: "$variants" },
@@ -848,11 +1006,18 @@ export const getAllProduct = async (req, res) => {
 
     const storageValues = [
       ...(facet.storageFields || []).flatMap((value) =>
-        Array.isArray(value) ? value : value ? [value] : [],
+        Array.isArray(value)
+          ? value
+          : value
+            ? [value]
+            : [],
       ),
+
       ...(facet.variants || []).flatMap((variants) =>
         Array.isArray(variants)
-          ? variants.map((variant) => variant?.storage).filter(Boolean)
+          ? variants
+              .map((variant) => variant?.storage)
+              .filter(Boolean)
           : [],
       ),
     ];
@@ -865,7 +1030,10 @@ export const getAllProduct = async (req, res) => {
         : [],
     );
 
-    const validPrices = (facet.prices || []).filter(Number.isFinite);
+    const validPrices = (facet.prices || []).filter(
+      (price) =>
+        typeof price === "number" && Number.isFinite(price),
+    );
 
     const selected = categoryQuery
       ? await findCategoryBySlug(categoryQuery)
@@ -879,6 +1047,7 @@ export const getAllProduct = async (req, res) => {
       limit,
       totalPages: Math.ceil(total / limit),
       products,
+
       category: selected
         ? {
             name: selected.category.name,
@@ -888,6 +1057,7 @@ export const getAllProduct = async (req, res) => {
             childCategory: selected.category.childCategory || null,
           }
         : null,
+
       filters: {
         brands: uniqueStrings(facet.brands || []),
         series: uniqueStrings(facet.series || []),
@@ -895,6 +1065,7 @@ export const getAllProduct = async (req, res) => {
         storage: uniqueStrings(storageValues),
         processors: uniqueStrings(facet.processors || []),
         colors: uniqueStrings(colorValues),
+
         price: {
           min: validPrices.length ? Math.min(...validPrices) : 0,
           max: validPrices.length ? Math.max(...validPrices) : 0,
@@ -913,18 +1084,23 @@ export const getAllProduct = async (req, res) => {
 
 /* =========================================================
    GET PRODUCTS / SEARCH
+
    GET /products?search=iphone&page=1&limit=12
 ========================================================= */
 
 export const getProducts = async (req, res) => {
   try {
-    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const page = Math.max(
+      1,
+      Number.parseInt(req.query.page, 10) || 1,
+    );
+
     const limit = Math.min(
       48,
-      Math.max(1, parseInt(req.query.limit, 10) || 12),
+      Math.max(1, Number.parseInt(req.query.limit, 10) || 12),
     );
-    const skip = (page - 1) * limit;
 
+    const skip = (page - 1) * limit;
     const search = cleanString(req.query.search);
     const filter = {};
 
@@ -1012,16 +1188,15 @@ export const getProductById = async (req, res) => {
   }
 };
 
-// Controller/addproduct.js
-
-
+/* =========================================================
+   DELETE PRODUCT
+========================================================= */
 
 export const deleteProduct = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Validate MongoDB ObjectId
-    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+    if (!isValidObjectId(id)) {
       return res.status(400).json({
         success: false,
         message: "Invalid product ID",
@@ -1036,6 +1211,8 @@ export const deleteProduct = async (req, res) => {
         message: "Product not found",
       });
     }
+
+    clearProductCache();
 
     return res.status(200).json({
       success: true,

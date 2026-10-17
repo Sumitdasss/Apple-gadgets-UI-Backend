@@ -35,12 +35,20 @@ const customerSchema = new mongoose.Schema(
       trim: true,
     },
 
-    role: {
-      type: String,
-      enum: ["customer", "admin", "subadmin", "employee"],
-      default: "customer",
-      required: true,
-    },
+   
+role: {
+  type: String,
+  enum: [
+    "customer",
+    "admin",
+    "subadmin",
+    "employee",
+    "order_manager",
+  ],
+  default: "customer",
+  required: true,
+},
+
 
     isActive: {
       type: Boolean,

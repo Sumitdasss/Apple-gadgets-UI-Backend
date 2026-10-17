@@ -1,7 +1,7 @@
 
+import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import mongoose from "mongoose";
 import { randomInt } from "crypto";
 
 import Customer from "../Model/Customer.js";
@@ -9,29 +9,24 @@ import { apiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { sendOtpEmail } from "../Service/SendOtpHandler.js";
 
-// ======================================================
-// CONFIGURATION
-// ======================================================
-
 const OTP_EXPIRY_MS = 5 * 60 * 1000;
 const MAX_LOGIN_OTP_ATTEMPTS = 5;
 
-const ALLOWED_ROLES = [
-  "customer",
-  "admin",
-  "subadmin",
-  "employee",
-];
+// =====================================================
+// COMMON HELPERS
+// =====================================================
 
 const generateOtp = () => randomInt(100000, 1000000).toString();
 
 const createOtpExpiry = () =>
   new Date(Date.now() + OTP_EXPIRY_MS);
 
-const normalizeEmail = (email) =>
+const normalizeEmail = (email = "") =>
   email.trim().toLowerCase();
 
 const sanitizeCustomer = (customer) => {
+  if (!customer) return null;
+
   const user =
     typeof customer.toObject === "function"
       ? customer.toObject()
@@ -43,39 +38,33 @@ const sanitizeCustomer = (customer) => {
   delete user.loginOtpHash;
   delete user.loginOtpExpires;
   delete user.loginOtpAttempts;
-  delete user.__v;
+  delete user.otp;
+  delete user.otpHash;
+  delete user.resetPasswordToken;
 
   return user;
 };
 
-const validObjectId = (id) =>
-  mongoose.isValidObjectId(id);
+const isValidId = (id) => mongoose.isValidObjectId(id);
 
-// ======================================================
+// =====================================================
 // REGISTER
-// Public registration always creates a CUSTOMER.
-// Never trust role sent by the frontend.
-// ======================================================
+// =====================================================
 
 export const register = asyncHandler(async (req, res) => {
   const { name, email, password, address, phone } = req.body;
 
   if (
-    typeof name !== "string" ||
-    typeof email !== "string" ||
-    typeof password !== "string" ||
-    typeof address !== "string" ||
-    typeof phone !== "string" ||
-    !name.trim() ||
-    !email.trim() ||
+    !name?.trim() ||
+    !email?.trim() ||
     !password ||
-    !address.trim() ||
-    !phone.trim()
+    !address?.trim() ||
+    !phone?.trim()
   ) {
     return apiResponse(res, 400, "All fields are required");
   }
 
-  if (password.length < 6) {
+  if (typeof password !== "string" || password.length < 6) {
     return apiResponse(
       res,
       400,
@@ -86,53 +75,44 @@ export const register = asyncHandler(async (req, res) => {
   const normalizedEmail = normalizeEmail(email);
   const normalizedPhone = phone.trim();
 
-  const existingEmail = await Customer.findOne({
-    email: normalizedEmail,
+  const existingCustomer = await Customer.findOne({
+    $or: [
+      { email: normalizedEmail },
+      { phone: normalizedPhone },
+    ],
   });
 
-  if (existingEmail) {
-    return apiResponse(res, 409, "Email already registered");
-  }
+  if (existingCustomer) {
+    if (existingCustomer.email === normalizedEmail) {
+      return apiResponse(res, 409, "Email already registered");
+    }
 
-  const existingPhone = await Customer.findOne({
-    phone: normalizedPhone,
-  });
-
-  if (existingPhone) {
     return apiResponse(res, 409, "Phone number already registered");
   }
 
   const otp = generateOtp();
+  const otpHash = await bcrypt.hash(otp, 10);
 
   const customer = await Customer.create({
     name: name.trim(),
     email: normalizedEmail,
-    password: await bcrypt.hash(password, 12),
+    password: await bcrypt.hash(password, 10),
     address: address.trim(),
     phone: normalizedPhone,
-
-    role: "customer",
-    isActive: true,
     isEmailVerified: false,
-
-    emailOtpHash: await bcrypt.hash(otp, 10),
+    emailOtpHash: otpHash,
     emailOtpExpires: createOtpExpiry(),
   });
 
   try {
-    // Preserve the argument order used by your original code.
     await sendOtpEmail(
-      normalizedEmail,
+      customer.email,
       otp,
-      name.trim(),
+      customer.name,
       "verify"
     );
   } catch (error) {
-    console.error("Registration OTP email failed:", error.message);
-
-    customer.emailOtpHash = undefined;
-    customer.emailOtpExpires = undefined;
-    await customer.save();
+    console.error("Registration OTP email failed:", error);
 
     return apiResponse(
       res,
@@ -152,9 +132,9 @@ export const register = asyncHandler(async (req, res) => {
   );
 });
 
-// ======================================================
+// =====================================================
 // VERIFY REGISTRATION EMAIL OTP
-// ======================================================
+// =====================================================
 
 export const verifyEmailOtp = asyncHandler(async (req, res) => {
   const { email, otp } = req.body;
@@ -169,7 +149,7 @@ export const verifyEmailOtp = asyncHandler(async (req, res) => {
   }
 
   if (!/^\d{6}$/.test(otp.trim())) {
-    return apiResponse(res, 400, "OTP must be 6 digits");
+    return apiResponse(res, 400, "OTP must contain 6 digits");
   }
 
   const customer = await Customer.findOne({
@@ -187,7 +167,7 @@ export const verifyEmailOtp = asyncHandler(async (req, res) => {
   if (
     !customer.emailOtpHash ||
     !customer.emailOtpExpires ||
-    customer.emailOtpExpires.getTime() <= Date.now()
+    new Date(customer.emailOtpExpires).getTime() <= Date.now()
   ) {
     return apiResponse(
       res,
@@ -196,12 +176,12 @@ export const verifyEmailOtp = asyncHandler(async (req, res) => {
     );
   }
 
-  const correct = await bcrypt.compare(
+  const isCorrect = await bcrypt.compare(
     otp.trim(),
     customer.emailOtpHash
   );
 
-  if (!correct) {
+  if (!isCorrect) {
     return apiResponse(res, 400, "Invalid OTP");
   }
 
@@ -214,9 +194,9 @@ export const verifyEmailOtp = asyncHandler(async (req, res) => {
   return apiResponse(res, 200, "Email verified successfully");
 });
 
-// ======================================================
+// =====================================================
 // RESEND REGISTRATION OTP
-// ======================================================
+// =====================================================
 
 export const resendEmailOtp = asyncHandler(async (req, res) => {
   const { email } = req.body;
@@ -227,7 +207,7 @@ export const resendEmailOtp = asyncHandler(async (req, res) => {
 
   const customer = await Customer.findOne({
     email: normalizeEmail(email),
-  }).select("+emailOtpHash +emailOtpExpires");
+  });
 
   if (!customer) {
     return apiResponse(res, 404, "Account not found");
@@ -245,13 +225,19 @@ export const resendEmailOtp = asyncHandler(async (req, res) => {
   await customer.save();
 
   try {
-    // Matches your original resendEmailOtp call signature.
-    await sendOtpEmail(customer.email, otp, "verify");
+    // Keep the same argument order as registration.
+    await sendOtpEmail(
+      customer.email,
+      otp,
+      customer.name,
+      "verify"
+    );
   } catch (error) {
-    console.error("Resend email OTP failed:", error.message);
+    console.error("Resend email OTP failed:", error);
 
     customer.emailOtpHash = undefined;
     customer.emailOtpExpires = undefined;
+
     await customer.save();
 
     return apiResponse(res, 502, "Could not send OTP email");
@@ -264,10 +250,9 @@ export const resendEmailOtp = asyncHandler(async (req, res) => {
   );
 });
 
-// ======================================================
-// LOGIN: PASSWORD + SEND OTP
-// Admin and Customer use the SAME login endpoint.
-// ======================================================
+// =====================================================
+// LOGIN: EMAIL + PASSWORD, THEN SEND OTP
+// =====================================================
 
 export const login = asyncHandler(async (req, res) => {
   const { email, password } = req.body;
@@ -293,6 +278,10 @@ export const login = asyncHandler(async (req, res) => {
     return apiResponse(res, 401, "Invalid email or password");
   }
 
+  if (!customer.password) {
+    return apiResponse(res, 401, "Invalid email or password");
+  }
+
   const passwordCorrect = await bcrypt.compare(
     password,
     customer.password
@@ -302,7 +291,7 @@ export const login = asyncHandler(async (req, res) => {
     return apiResponse(res, 401, "Invalid email or password");
   }
 
-  if (!customer.isActive) {
+  if (customer.isActive === false) {
     return apiResponse(res, 403, "Your account is inactive");
   }
 
@@ -323,10 +312,14 @@ export const login = asyncHandler(async (req, res) => {
   await customer.save();
 
   try {
-    // Matches your original loginEmail call signature.
-    await sendOtpEmail(customer.email, otp, "login");
+    await sendOtpEmail(
+      customer.email,
+      otp,
+      customer.name,
+      "login"
+    );
   } catch (error) {
-    console.error("Login OTP email failed:", error.message);
+    console.error("Login OTP email failed:", error);
 
     customer.loginOtpHash = undefined;
     customer.loginOtpExpires = undefined;
@@ -337,26 +330,20 @@ export const login = asyncHandler(async (req, res) => {
     return apiResponse(res, 502, "Could not send login OTP");
   }
 
-  return apiResponse(
-    res,
-    200,
-    "Login OTP sent to your email",
-    {
-      email: customer.email,
-      requiresLoginOtp: true,
-    }
-  );
+  // Do not issue a JWT until the login OTP is verified.
+  return apiResponse(res, 200, "Login OTP sent to your email", {
+    email: customer.email,
+    requiresLoginOtp: true,
+  });
 });
 
-// ======================================================
-// VERIFY LOGIN OTP + ISSUE JWT
-// ======================================================
-
+// =====================================================
+// VERIFY LOGIN OTP AND ISSUE JWT
+// =====================================================
 
 export const verifyLoginOtp = asyncHandler(async (req, res) => {
   const { email, otp } = req.body;
 
-  // 1. Validate input
   if (
     typeof email !== "string" ||
     typeof otp !== "string" ||
@@ -367,10 +354,9 @@ export const verifyLoginOtp = asyncHandler(async (req, res) => {
   }
 
   if (!/^\d{6}$/.test(otp.trim())) {
-    return apiResponse(res, 400, "OTP must be 6 digits");
+    return apiResponse(res, 400, "OTP must contain 6 digits");
   }
 
-  // 2. Find customer and OTP fields
   const customer = await Customer.findOne({
     email: normalizeEmail(email),
   }).select(
@@ -381,7 +367,10 @@ export const verifyLoginOtp = asyncHandler(async (req, res) => {
     return apiResponse(res, 404, "Account not found");
   }
 
-  if (!customer.isActive || !customer.isEmailVerified) {
+  if (
+    customer.isActive === false ||
+    !customer.isEmailVerified
+  ) {
     return apiResponse(
       res,
       403,
@@ -389,11 +378,10 @@ export const verifyLoginOtp = asyncHandler(async (req, res) => {
     );
   }
 
-  // 3. Check OTP expiry
   if (
     !customer.loginOtpHash ||
     !customer.loginOtpExpires ||
-    customer.loginOtpExpires.getTime() <= Date.now()
+    new Date(customer.loginOtpExpires).getTime() <= Date.now()
   ) {
     return apiResponse(
       res,
@@ -402,7 +390,6 @@ export const verifyLoginOtp = asyncHandler(async (req, res) => {
     );
   }
 
-  // 4. Check maximum attempts
   if (
     (customer.loginOtpAttempts || 0) >= MAX_LOGIN_OTP_ATTEMPTS
   ) {
@@ -419,43 +406,24 @@ export const verifyLoginOtp = asyncHandler(async (req, res) => {
     );
   }
 
-  // 5. Compare OTP
-  const correct = await bcrypt.compare(
+  const isCorrect = await bcrypt.compare(
     otp.trim(),
     customer.loginOtpHash
   );
 
-  if (!correct) {
+  if (!isCorrect) {
     customer.loginOtpAttempts =
       (customer.loginOtpAttempts || 0) + 1;
-
-    if (
-      customer.loginOtpAttempts >= MAX_LOGIN_OTP_ATTEMPTS
-    ) {
-      customer.loginOtpHash = undefined;
-      customer.loginOtpExpires = undefined;
-      customer.loginOtpAttempts = 0;
-
-      await customer.save();
-
-      return apiResponse(
-        res,
-        429,
-        "Too many incorrect OTP attempts. Please log in again."
-      );
-    }
 
     await customer.save();
 
     return apiResponse(res, 400, "Invalid OTP");
   }
 
-  // 6. Check JWT secret
   if (!process.env.JWT_ACCESS_SECRET) {
     throw new Error("JWT_ACCESS_SECRET is missing");
   }
 
-  // 7. Generate JWT using database user ID and role
   const token = jwt.sign(
     {
       id: customer._id.toString(),
@@ -465,36 +433,28 @@ export const verifyLoginOtp = asyncHandler(async (req, res) => {
     { expiresIn: "7d" }
   );
 
-  // 8. Clear OTP after successful verification
+  // Clear OTP so it cannot be reused.
   customer.loginOtpHash = undefined;
   customer.loginOtpExpires = undefined;
   customer.loginOtpAttempts = 0;
 
   await customer.save();
 
-  // 9. Set HttpOnly authentication cookie
-  const isProduction = process.env.NODE_ENV === "production";
-
-  res.cookie("accessToken", token, {
-    httpOnly: true,
-    secure: isProduction,
-    sameSite: isProduction ? "none" : "lax",
-    path: "/",
-    maxAge: 7 * 24 * 60 * 60 * 1000,
-  });
-
-  // 10. Send response
   return apiResponse(res, 200, "Login successful", {
     user: sanitizeCustomer(customer),
     token,
   });
 });
 
-// ======================================================
-// MY PROFILE
-// ======================================================
+// =====================================================
+// GET MY PROFILE
+// =====================================================
 
 export const getMyProfile = asyncHandler(async (req, res) => {
+  if (!req.user) {
+    return apiResponse(res, 401, "Authentication required");
+  }
+
   return apiResponse(
     res,
     200,
@@ -503,274 +463,322 @@ export const getMyProfile = asyncHandler(async (req, res) => {
   );
 });
 
-// ======================================================
+// =====================================================
 // GET ALL CUSTOMERS
-// Search, status filter and pagination.
-// Protect this route with verifyToken + authorizeRoles("admin").
-// ======================================================
+// GET /api/customers/AllCustomers
+// =====================================================
 
-export const getAllCustomers = asyncHandler(async (req, res) => {
-  const page = Math.max(
-    1,
-    Number.parseInt(req.query.page, 10) || 1
-  );
-
-  const limit = Math.min(
-    50,
-    Math.max(1, Number.parseInt(req.query.limit, 10) || 10)
-  );
-
-  const search = String(req.query.search || "").trim();
-  const status = String(req.query.status || "all");
-  const role = String(req.query.role || "all");
-
-  const filter = {};
-
-  if (search) {
-    const escaped = search.replace(
-      /[.*+?^${}()|[\]\\]/g,
-      "\\$&"
+export const getAllCustomers = async (req, res) => {
+  try {
+    const page = Math.max(
+      1,
+      Number.parseInt(req.query.page, 10) || 1
     );
 
-    const regex = new RegExp(escaped, "i");
+    const limit = Math.min(
+      50,
+      Math.max(1, Number.parseInt(req.query.limit, 10) || 10)
+    );
 
-    filter.$or = [
-      { name: regex },
-      { email: regex },
-      { phone: regex },
-    ];
-  }
+    const search = String(req.query.search || "").trim();
+    const status = String(req.query.status || "all");
 
-  if (status === "active") {
-    filter.isActive = true;
-  } else if (status === "blocked") {
-    filter.isActive = false;
-  } else if (status !== "all") {
-    return apiResponse(res, 400, "Invalid status filter");
-  }
+    const filter = {};
 
-  if (role !== "all") {
-    if (!ALLOWED_ROLES.includes(role)) {
-      return apiResponse(res, 400, "Invalid role filter");
+    if (search) {
+      const escapedSearch = search.replace(
+        /[.*+?^${}()|[\]\\]/g,
+        "\\$&"
+      );
+
+      const regex = new RegExp(escapedSearch, "i");
+
+      filter.$or = [
+        { name: regex },
+        { email: regex },
+        { phone: regex },
+      ];
     }
 
-    filter.role = role;
-  }
+    if (status === "active") {
+      filter.isActive = true;
+    } else if (status === "blocked") {
+      filter.isActive = false;
+    }
 
-  const [customers, total] = await Promise.all([
-    Customer.find(filter)
-      .select(
-        "_id name email phone address role isActive isEmailVerified createdAt updatedAt"
-      )
-      .sort({ createdAt: -1 })
-      .skip((page - 1) * limit)
-      .limit(limit)
-      .lean(),
+    const [customers, total] = await Promise.all([
+      Customer.find(filter)
+        .select(
+          "_id name email phone address role isActive isEmailVerified createdAt updatedAt"
+        )
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean(),
 
-    Customer.countDocuments(filter),
-  ]);
+      Customer.countDocuments(filter),
+    ]);
 
-  return res.status(200).json({
-    success: true,
-    message: "Customers fetched successfully",
-    data: {
-      customers,
-      pagination: {
-        total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit),
+    return res.status(200).json({
+      success: true,
+      message: "Customers fetched successfully",
+      data: {
+        customers,
+        pagination: {
+          total,
+          page,
+          limit,
+          totalPages: Math.ceil(total / limit),
+        },
       },
-    },
-  });
-});
+    });
+  } catch (error) {
+    console.error("Get customers error:", error);
 
-// ======================================================
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch customers",
+    });
+  }
+};
+
+// =====================================================
 // GET CUSTOMER BY ID
-// ======================================================
+// GET /api/customers/getCustomer/:id
+// =====================================================
 
-export const getCustomerById = asyncHandler(async (req, res) => {
-  const { id } = req.params;
+export const getCustomerById = async (req, res) => {
+  try {
+    const { id } = req.params;
 
-  if (!validObjectId(id)) {
-    return apiResponse(res, 400, "Invalid customer ID");
-  }
-
-  const customer = await Customer.findById(id)
-    .select(
-      "_id name email phone address role isActive isEmailVerified createdAt updatedAt"
-    )
-    .lean();
-
-  if (!customer) {
-    return apiResponse(res, 404, "Customer not found");
-  }
-
-  return apiResponse(
-    res,
-    200,
-    "Customer details fetched successfully",
-    customer
-  );
-});
-
-// ======================================================
-// UPDATE CUSTOMER ROLE
-// Only an authenticated ADMIN may call this controller.
-// Never allow an admin to change their own role here.
-// Existing admin accounts cannot be demoted through this API.
-// ======================================================
-
-export const updateCustomerRole = asyncHandler(async (req, res) => {
-  const { id } = req.params;
-  const { role } = req.body;
-
-  if (!validObjectId(id)) {
-    return apiResponse(res, 400, "Invalid customer ID");
-  }
-
-  if (!ALLOWED_ROLES.includes(role)) {
-    return apiResponse(res, 400, "Invalid role");
-  }
-
-  const actorId = req.user?._id?.toString();
-
-  if (actorId && actorId === id) {
-    return apiResponse(
-      res,
-      403,
-      "You cannot change your own role"
-    );
-  }
-
-  const customer = await Customer.findById(id);
-
-  if (!customer) {
-    return apiResponse(res, 404, "Customer not found");
-  }
-
-  if (customer.role === "admin" && role !== "admin") {
-    return apiResponse(
-      res,
-      403,
-      "An admin account cannot be demoted here"
-    );
-  }
-
-  customer.role = role;
-  await customer.save();
-
-  return apiResponse(
-    res,
-    200,
-    "Customer role updated successfully",
-    {
-      _id: customer._id,
-      name: customer.name,
-      email: customer.email,
-      role: customer.role,
+    if (!isValidId(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid customer ID",
+      });
     }
-  );
-});
 
-// ======================================================
-// BLOCK / UNBLOCK CUSTOMER
-// ======================================================
+    const customer = await Customer.findById(id)
+      .select(
+        "-password -emailOtpHash -emailOtpExpires -loginOtpHash -loginOtpExpires -loginOtpAttempts -resetPasswordToken -otp -otpHash"
+      )
+      .lean();
 
-export const updateCustomerStatus = asyncHandler(
-  async (req, res) => {
+    if (!customer) {
+      return res.status(404).json({
+        success: false,
+        message: "Customer not found",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Customer details fetched successfully",
+      data: {
+        customer,
+      },
+    });
+  } catch (error) {
+    console.error("getCustomerById error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch customer details",
+    });
+  }
+};
+
+// =====================================================
+// UPDATE CUSTOMER STATUS
+// PATCH /api/customers/updateCustomerStatus/:id
+// Body: { "isActive": true }
+// =====================================================
+
+export const updateCustomerStatus = async (req, res) => {
+  try {
     const { id } = req.params;
     const { isActive } = req.body;
 
-    if (!validObjectId(id)) {
-      return apiResponse(res, 400, "Invalid customer ID");
+    if (!isValidId(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid customer ID",
+      });
     }
 
     if (typeof isActive !== "boolean") {
-      return apiResponse(
-        res,
-        400,
-        "isActive must be true or false"
-      );
-    }
-
-    if (req.user?._id?.toString() === id && !isActive) {
-      return apiResponse(
-        res,
-        403,
-        "You cannot deactivate your own account here"
-      );
+      return res.status(400).json({
+        success: false,
+        message: "isActive must be true or false",
+      });
     }
 
     const customer = await Customer.findById(id);
 
     if (!customer) {
-      return apiResponse(res, 404, "Customer not found");
+      return res.status(404).json({
+        success: false,
+        message: "Customer not found",
+      });
     }
 
     if (customer.role === "admin") {
-      return apiResponse(
-        res,
-        403,
-        "Admin accounts cannot be blocked here"
-      );
+      return res.status(403).json({
+        success: false,
+        message: "Admin accounts cannot be blocked here",
+      });
     }
 
     customer.isActive = isActive;
+
     await customer.save();
 
-    return apiResponse(
-      res,
-      200,
-      isActive
+    return res.status(200).json({
+      success: true,
+      message: isActive
         ? "Customer unblocked successfully"
         : "Customer blocked successfully",
-      {
+      data: {
         _id: customer._id,
         name: customer.name,
-        role: customer.role,
         isActive: customer.isActive,
-      }
-    );
-  }
-);
+      },
+    });
+  } catch (error) {
+    console.error("Update customer status error:", error);
 
-// ======================================================
+    return res.status(500).json({
+      success: false,
+      message: "Failed to update customer status",
+    });
+  }
+};
+
+// =====================================================
 // DELETE CUSTOMER
-// ======================================================
+// DELETE /api/customers/deleteCustomer/:id
+// =====================================================
 
-export const deleteCustomer = asyncHandler(async (req, res) => {
-  const { id } = req.params;
+export const deleteCustomer = async (req, res) => {
+  try {
+    const { id } = req.params;
 
-  if (!validObjectId(id)) {
-    return apiResponse(res, 400, "Invalid customer ID");
+    if (!isValidId(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid customer ID",
+      });
+    }
+
+    const customer = await Customer.findById(id);
+
+    if (!customer) {
+      return res.status(404).json({
+        success: false,
+        message: "Customer not found",
+      });
+    }
+
+    if (customer.role === "admin") {
+      return res.status(403).json({
+        success: false,
+        message: "Admin accounts cannot be deleted here",
+      });
+    }
+
+    await Customer.deleteOne({ _id: customer._id });
+
+    return res.status(200).json({
+      success: true,
+      message: "Customer deleted successfully",
+      data: {
+        _id: customer._id,
+      },
+    });
+  } catch (error) {
+    console.error("Delete customer error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to delete customer",
+    });
   }
+};
 
-  if (req.user?._id?.toString() === id) {
-    return apiResponse(
-      res,
-      403,
-      "You cannot delete your own account here"
-    );
+
+
+
+
+
+
+export const updateCustomerRole = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { role } = req.body;
+
+    const allowedRoles = [
+      "customer",
+      "admin",
+      "subadmin",
+      "employee",
+      "order_manager",
+    ];
+
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid customer ID",
+      });
+    }
+
+    if (
+      typeof role !== "string" ||
+      !allowedRoles.includes(role)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid customer role",
+        allowedRoles,
+      });
+    }
+
+    const customer = await Customer.findById(id);
+
+    if (!customer) {
+      return res.status(404).json({
+        success: false,
+        message: "Customer not found",
+      });
+    }
+
+    customer.role = role;
+    await customer.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Customer role updated successfully",
+      data: {
+        customer: {
+          _id: customer._id,
+          name: customer.name,
+          email: customer.email,
+          phone: customer.phone,
+          role: customer.role,
+          isActive: customer.isActive,
+        },
+      },
+    });
+  } catch (error) {
+    console.error("Update customer role error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to update customer role",
+      ...(process.env.NODE_ENV === "development"
+        ? { error: error.message }
+        : {}),
+    });
   }
+};
 
-  const customer = await Customer.findById(id);
 
-  if (!customer) {
-    return apiResponse(res, 404, "Customer not found");
-  }
-
-  if (customer.role === "admin") {
-    return apiResponse(
-      res,
-      403,
-      "Admin accounts cannot be deleted here"
-    );
-  }
-
-  await Customer.deleteOne({ _id: customer._id });
-
-  return apiResponse(res, 200, "Customer deleted successfully", {
-    _id: customer._id,
-  });
-});

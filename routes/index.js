@@ -26,7 +26,7 @@ import {  createOrder, getAllOrders, getOrderByOrderId, getOrderDetails, getOrde
 import { OderActivity } from "../Controller/ShowOderactivity.js";
 import { getDashboardSummary } from "../Controller/Deshbord.js";
 import { bulkUpdateOrders, deleteOrder, getOrders, updateOrder } from "../Controller/OrderMange.js";
-import { deleteCustomer, getAllCustomers, getCustomerById, getMyProfile, login, register, resendEmailOtp, updateCustomerStatus, verifyEmailOtp, verifyLoginOtp } from "../Controller/AuthController.js";
+import { deleteCustomer, getAllCustomers, getCustomerById, getMyProfile, login, register, resendEmailOtp, updateCustomerRole, updateCustomerStatus, verifyEmailOtp, verifyLoginOtp } from "../Controller/AuthController.js";
 import { verifyToken } from "../Middleware/authMiddleware.js";
 import { authorizeRoles } from "../Middleware/roleMiddleware.js";
 const router = express.Router();
@@ -87,8 +87,7 @@ router.get(
   authorizeRoles("customer", "admin"),
   getMyProfile
 );
-router.delete("/:id", deleteProduct);
-router.get("/:id", getProductById);
+
 router.put(
   "/updateproduct/:id",
   upload.fields([
@@ -111,6 +110,8 @@ router.get("/AllCustomers", getAllCustomers);
 router.get("/getCustomer/:id", getCustomerById);
 router.patch("/updateCustomerStatus/:id", updateCustomerStatus);
 router.delete("/deleteCustomer/:id", deleteCustomer);
-
+router.patch("/updateCustomerRole/:id", updateCustomerRole);
+router.delete("/:id", deleteProduct);
+router.get("/:id", getProductById);
 
 export default router;

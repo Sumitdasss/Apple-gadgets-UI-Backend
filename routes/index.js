@@ -26,7 +26,7 @@ import {  createOrder, getAllOrders, getOrderByOrderId, getOrderDetails, getOrde
 import { OderActivity } from "../Controller/ShowOderactivity.js";
 import { getDashboardSummary } from "../Controller/Deshbord.js";
 import { bulkUpdateOrders, deleteOrder, getOrders, updateOrder } from "../Controller/OrderMange.js";
-import { getMyProfile, login, register, resendEmailOtp, verifyEmailOtp, verifyLoginOtp } from "../Controller/AuthController.js";
+import { deleteCustomer, getAllCustomers, getCustomerById, getMyProfile, login, register, resendEmailOtp, updateCustomerStatus, verifyEmailOtp, verifyLoginOtp } from "../Controller/AuthController.js";
 import { verifyToken } from "../Middleware/authMiddleware.js";
 import { authorizeRoles } from "../Middleware/roleMiddleware.js";
 const router = express.Router();
@@ -84,7 +84,7 @@ router.get("/order-id/:orderId", getOrderByOrderId);
 router.get(
   "/me",
   verifyToken,
-  authorizeRoles("customer", "admin"),
+   authorizeRoles("customer", "admin", "subadmin", "employee"),
   getMyProfile
 );
 router.delete("/:id", deleteProduct);
@@ -106,8 +106,11 @@ router.put(
 router.get("/:orderId/navigation", getOrderNavigation);
 
 // GET /api/orders/:orderId
-router.get("/getOderdetails/:orderId", getOrderDetails);
 
+router.get("/AllCustomers", getAllCustomers);
+router.get("/getCustomer/:id", getCustomerById);
+router.patch("/updateCustomerStatus/:id", updateCustomerStatus);
+router.delete("/deleteCustomer/:id", deleteCustomer);
 
 
 export default router;

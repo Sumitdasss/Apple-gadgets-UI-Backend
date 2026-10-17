@@ -385,7 +385,7 @@ export const sendInvoiceEmail = async (order) => {
 
     // Send complete email
     await transporter.sendMail({
-      from: process.env.MAIL_FROM || process.env.SMTP_USER,
+      from: `"Apple Gadgets" <${process.env.MAIL_FROM || process.env.SMTP_USER}>`,
       to: order.email.trim(),
       subject: `Apple Gadget BD Invoice - ${order.orderId}`,
 

@@ -352,9 +352,11 @@ export const login = asyncHandler(async (req, res) => {
 // VERIFY LOGIN OTP + ISSUE JWT
 // ======================================================
 
+
 export const verifyLoginOtp = asyncHandler(async (req, res) => {
   const { email, otp } = req.body;
 
+  // 1. Validate input
   if (
     typeof email !== "string" ||
     typeof otp !== "string" ||
@@ -368,6 +370,7 @@ export const verifyLoginOtp = asyncHandler(async (req, res) => {
     return apiResponse(res, 400, "OTP must be 6 digits");
   }
 
+  // 2. Find customer and OTP fields
   const customer = await Customer.findOne({
     email: normalizeEmail(email),
   }).select(
@@ -386,6 +389,7 @@ export const verifyLoginOtp = asyncHandler(async (req, res) => {
     );
   }
 
+  // 3. Check OTP expiry
   if (
     !customer.loginOtpHash ||
     !customer.loginOtpExpires ||
@@ -398,9 +402,9 @@ export const verifyLoginOtp = asyncHandler(async (req, res) => {
     );
   }
 
+  // 4. Check maximum attempts
   if (
-    (customer.loginOtpAttempts || 0) >=
-    MAX_LOGIN_OTP_ATTEMPTS
+    (customer.loginOtpAttempts || 0) >= MAX_LOGIN_OTP_ATTEMPTS
   ) {
     customer.loginOtpHash = undefined;
     customer.loginOtpExpires = undefined;
@@ -415,6 +419,7 @@ export const verifyLoginOtp = asyncHandler(async (req, res) => {
     );
   }
 
+  // 5. Compare OTP
   const correct = await bcrypt.compare(
     otp.trim(),
     customer.loginOtpHash
@@ -445,11 +450,12 @@ export const verifyLoginOtp = asyncHandler(async (req, res) => {
     return apiResponse(res, 400, "Invalid OTP");
   }
 
+  // 6. Check JWT secret
   if (!process.env.JWT_ACCESS_SECRET) {
     throw new Error("JWT_ACCESS_SECRET is missing");
   }
 
-  // Role comes from the database, not req.body.
+  // 7. Generate JWT using database user ID and role
   const token = jwt.sign(
     {
       id: customer._id.toString(),
@@ -459,12 +465,25 @@ export const verifyLoginOtp = asyncHandler(async (req, res) => {
     { expiresIn: "7d" }
   );
 
+  // 8. Clear OTP after successful verification
   customer.loginOtpHash = undefined;
   customer.loginOtpExpires = undefined;
   customer.loginOtpAttempts = 0;
 
   await customer.save();
 
+  // 9. Set HttpOnly authentication cookie
+  const isProduction = process.env.NODE_ENV === "production";
+
+  res.cookie("accessToken", token, {
+    httpOnly: true,
+    secure: isProduction,
+    sameSite: isProduction ? "none" : "lax",
+    path: "/",
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+  });
+
+  // 10. Send response
   return apiResponse(res, 200, "Login successful", {
     user: sanitizeCustomer(customer),
     token,

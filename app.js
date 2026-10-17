@@ -6,6 +6,7 @@ import DNS from "dns";
 import { connectDB } from "./config/db.js";
 import router from "./routes/index.js";
 import { apiResponse } from "./utils/ApiResponse.js";
+import cookieParser from "cookie-parser";
 
 DNS.setServers(["1.1.1.1", "8.8.8.8"]);
 
@@ -29,6 +30,7 @@ app.use(
 
 // ================= BODY PARSER =================
 app.use(express.json());
+app.use(cookieParser());
 app.use(express.urlencoded({ extended: true }));
 
 // ================= ROUTES =================

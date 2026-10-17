@@ -30,87 +30,125 @@ import { deleteCustomer, getAllCustomers, getCustomerById, getMyProfile, login, 
 import { verifyToken } from "../Middleware/authMiddleware.js";
 import { authorizeRoles } from "../Middleware/roleMiddleware.js";
 const router = express.Router();
-router.post(
-  "/addproduct",
-  upload.fields([
-    {
-      name: "images",
-      maxCount: 10,
-    },
-    {
-      name: "colorImages",
-      maxCount: 20,
-    },
-  ]),
-  addProduct,
-);
-
-router.get("/webhook", verifyWebhook);
-
-router.post("/webhook", receiveWebhook);
-router.get("/webhook/check-token", checkFacebookToken);
-
-router.get("/getALLproducts", getAllProduct);
-router.post("/CreateOrder", createOrder);
-
-router.post( "/main", upload.fields([ { name: "image", maxCount: 1 }, { name: "bannerImage", maxCount: 1 }, ]), createMainCategory ); 
-// 
-
-router.post( "/sub", upload.fields([ { name: "image", maxCount: 1 }, { name: "bannerImage", maxCount: 1 }, ]), createSubCategory ); 
- router.post( "/child", upload.fields([ { name: "image", maxCount: 1 }, { name: "bannerImage", maxCount: 1 }, ]), createChildCategory ); 
-  router.post( "/sub-child", upload.fields([ { name: "image", maxCount: 1 }, { name: "bannerImage", maxCount: 1 }, ]), createSubChildCategory );
-router.get("/tree", getFullCategoryTree);
-router.get("/order-activity", OderActivity);
-router.get("/summary", getDashboardSummary);
-router.get("/products", getProducts);
-router.get("/order", getOrders);
-router.patch("/bulk-update", bulkUpdateOrders);
-router.put("/orders/:id", updateOrder);
-router.delete("/orders/:id", deleteOrder);
-router.get("/Allorders", getAllOrders);
-
-// GET /api/orders/:orderId/navigation
-
-router.patch(
-  "/:type/:id/banner",
-  updateCategoryBanner
-);
 router.post("/register", register);
 router.post("/verify-email-otp", verifyEmailOtp);
 router.post("/resend-email-otp", resendEmailOtp);
 router.post("/login", login);
 router.post("/verify-login-otp", verifyLoginOtp);
-router.get("/order-id/:orderId", getOrderByOrderId);
+
 router.get(
   "/me",
   verifyToken,
-   authorizeRoles("customer", "admin", "subadmin", "employee"),
+  authorizeRoles("customer", "admin", "subadmin", "employee"),
   getMyProfile
 );
-router.delete("/:id", deleteProduct);
+
+// ================= WEBHOOK =================
+
+router.get("/webhook", verifyWebhook);
+router.post("/webhook", receiveWebhook);
+router.get("/webhook/check-token", checkFacebookToken);
+
+// ================= PRODUCTS =================
+
+router.post(
+  "/addproduct",
+  verifyToken,
+  authorizeRoles("admin", "subadmin", "employee"),
+  upload.fields([
+    { name: "images", maxCount: 10 },
+    { name: "colorImages", maxCount: 20 },
+  ]),
+  addProduct
+);
+
+router.get("/getALLproducts", getAllProduct);
+router.get("/products", getProducts);
+
+// ================= CATEGORIES =================
+
+const categoryUpload = upload.fields([
+  { name: "image", maxCount: 1 },
+  { name: "bannerImage", maxCount: 1 },
+]);
+
+router.post(
+  "/main",
+  verifyToken,
+  authorizeRoles("admin", "subadmin", "employee"),
+  categoryUpload,
+  createMainCategory
+);
+
+router.post(
+  "/sub",
+  verifyToken,
+  authorizeRoles("admin", "subadmin", "employee"),
+  categoryUpload,
+  createSubCategory
+);
+
+router.post(
+  "/child",
+  verifyToken,
+  authorizeRoles("admin", "subadmin", "employee"),
+  categoryUpload,
+  createChildCategory
+);
+
+router.post(
+  "/sub-child",
+  verifyToken,
+  authorizeRoles("admin", "subadmin", "employee"),
+  categoryUpload,
+  createSubChildCategory
+);
+
+router.get("/tree", getFullCategoryTree);
+router.patch("/:type/:id/banner", verifyToken, authorizeRoles("admin", "subadmin"), updateCategoryBanner);
+
+// ================= ORDERS =================
+
+router.post("/CreateOrder", createOrder);
+router.get("/order-activity", verifyToken, authorizeRoles("admin", "subadmin", "employee"), OderActivity);
+router.get("/summary", verifyToken, authorizeRoles("admin", "subadmin", "employee"), getDashboardSummary);
+router.get("/order", verifyToken, authorizeRoles("admin", "subadmin", "employee"), getOrders);
+router.get("/Allorders", verifyToken, authorizeRoles("admin", "subadmin", "employee"), getAllOrders);
+router.patch("/bulk-update", verifyToken, authorizeRoles("admin", "subadmin", "employee"), bulkUpdateOrders);
+router.put("/orders/:id", verifyToken, authorizeRoles("admin", "subadmin", "employee"), updateOrder);
+router.delete("/orders/:id", verifyToken, authorizeRoles("admin", "subadmin"), deleteOrder);
+router.get("/order-id/:orderId", getOrderByOrderId);
+router.get("/:orderId/navigation", verifyToken, authorizeRoles("admin", "subadmin", "employee"), getOrderNavigation);
+
+// ================= CUSTOMERS =================
+
+router.get("/AllCustomers", verifyToken, authorizeRoles("admin", "subadmin", "employee"), getAllCustomers);
+router.get("/getCustomer/:id", verifyToken, authorizeRoles("admin", "subadmin", "employee"), getCustomerById);
+router.patch("/updateCustomerStatus/:id", verifyToken, authorizeRoles("admin", "subadmin"), updateCustomerStatus);
+router.delete("/deleteCustomer/:id", verifyToken, authorizeRoles("admin", "subadmin"), deleteCustomer);
+
+// ================= PRODUCT BY ID =================
+// Keep generic product routes at the bottom.
+
 router.get("/:id", getProductById);
+
 router.put(
   "/updateproduct/:id",
+  verifyToken,
+  authorizeRoles("admin", "subadmin", "employee"),
   upload.fields([
-    {
-      name: "images",
-      maxCount: 10,
-    },
-    {
-      name: "colorImages",
-      maxCount: 20,
-    },
+    { name: "images", maxCount: 10 },
+    { name: "colorImages", maxCount: 20 },
   ]),
-  updateProduct,
+  updateProduct
 );
-router.get("/:orderId/navigation", getOrderNavigation);
 
-// GET /api/orders/:orderId
-
-router.get("/AllCustomers", getAllCustomers);
-router.get("/getCustomer/:id", getCustomerById);
-router.patch("/updateCustomerStatus/:id", updateCustomerStatus);
-router.delete("/deleteCustomer/:id", deleteCustomer);
+router.delete(
+  "/:id",
+  verifyToken,
+  authorizeRoles("admin", "subadmin"),
+  deleteProduct
+);
 
 
 export default router;

@@ -244,7 +244,10 @@ const productSchema = new mongoose.Schema(
     // =========================
     // STATUS
     // =========================
-
+keyFeatures: {
+  type: [String],
+  default: [],
+},
     isActive: {
       type: Boolean,
       default: true,

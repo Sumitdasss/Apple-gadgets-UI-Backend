@@ -551,6 +551,21 @@ const saveProduct = async (req, res, isUpdate = false) => {
           })
         : calculatedDiscountPercentage;
 
+let keyFeatures = [];
+
+try {
+  keyFeatures = req.body.keyFeatures
+    ? JSON.parse(req.body.keyFeatures)
+    : [];
+} catch {
+  return res.status(400).json({
+    success: false,
+    message: "Invalid keyFeatures format",
+  });
+}
+
+
+
     const productData = {
       name,
       slug,
@@ -588,6 +603,7 @@ const saveProduct = async (req, res, isUpdate = false) => {
       sizes: uniqueStrings(sizesInput),
       ram: uniqueStrings(ramInput),
       specifications,
+      keyFeatures,
       variants,
 
       rating,

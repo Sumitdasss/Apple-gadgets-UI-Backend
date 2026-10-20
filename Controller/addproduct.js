@@ -448,6 +448,12 @@ const saveProduct = async (req, res, isUpdate = false) => {
       getOldArray(existingProduct, "keyFeatures")
     );
 
+    const descriptionSectionsInput = parseArrayField(
+  body,
+  "descriptionSections",
+  getOldArray(existingProduct, "descriptionSections")
+);
+
     const variantsInput = parseArrayField(
       body,
       "variants",
@@ -520,6 +526,10 @@ const saveProduct = async (req, res, isUpdate = false) => {
     const newColorImages = (files.colorImages || []).map(
       (file) => file.path
     );
+
+    const newDescriptionSectionImages = (
+  files.descriptionSectionImages || []
+).map((file) => file.path);
 
     const oldImages = Array.isArray(existingProduct?.images)
       ? existingProduct.images
@@ -636,6 +646,24 @@ const saveProduct = async (req, res, isUpdate = false) => {
       ram: uniqueStrings(ramInput),
       specifications,
       keyFeatures,
+
+
+descriptionSections: descriptionSectionsInput.map(
+  (section) => ({
+    title: cleanString(section.title),
+    description: cleanString(section.description),
+
+    image:
+      section.imageIndex !== null &&
+      section.imageIndex !== undefined &&
+      newDescriptionSectionImages[section.imageIndex]
+        ? newDescriptionSectionImages[section.imageIndex]
+        : cleanString(section.image || ""),
+  })
+),
+
+
+
       variants,
 
       rating,

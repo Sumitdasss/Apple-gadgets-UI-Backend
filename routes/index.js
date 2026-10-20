@@ -30,6 +30,7 @@ import { deleteCustomer, getAllCustomers, getCustomerById, getMyProfile, login, 
 import { verifyToken } from "../Middleware/authMiddleware.js";
 import { authorizeRoles } from "../Middleware/roleMiddleware.js";
 const router = express.Router();
+
 router.post(
   "/addproduct",
   upload.fields([
@@ -41,9 +42,14 @@ router.post(
       name: "colorImages",
       maxCount: 20,
     },
+    {
+      name: "descriptionSectionImages",
+      maxCount: 20,
+    },
   ]),
   addProduct,
 );
+
 
 router.get("/webhook", verifyWebhook);
 
@@ -97,6 +103,10 @@ router.put(
     },
     {
       name: "colorImages",
+      maxCount: 20,
+    },
+     {
+      name: "descriptionSectionImages",
       maxCount: 20,
     },
   ]),

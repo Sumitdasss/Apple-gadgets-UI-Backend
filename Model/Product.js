@@ -248,6 +248,22 @@ keyFeatures: {
   type: [String],
   default: [],
 },
+descriptionSections: [
+  {
+    title: {
+      type: String,
+      trim: true,
+    },
+    description: {
+      type: String,
+      trim: true,
+    },
+    image: {
+      type: String,
+      default: "",
+    },
+  },
+],
     isActive: {
       type: Boolean,
       default: true,

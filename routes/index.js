@@ -7,7 +7,10 @@ import {
   getProductById,
   getProducts,
   updateProduct,
-  deleteProduct
+  deleteProduct,
+  getReviewSummary,
+  getProductReviews,
+  createReview
 } from "../Controller/addproduct.js";
 import {
   receiveWebhook,
@@ -121,6 +124,18 @@ router.get("/getCustomer/:id", getCustomerById);
 router.patch("/updateCustomerStatus/:id", updateCustomerStatus);
 router.delete("/deleteCustomer/:id", deleteCustomer);
 router.patch("/updateCustomerRole/:id", updateCustomerRole);
+router.get("/:productId/reviews/summary", getReviewSummary);
+router.get("/:productId/reviews", getProductReviews);
+
+router.post(
+  "/:productId/reviews",
+  upload.array("images", 5),
+  createReview
+);
+
+
+
+
 router.delete("/:id", deleteProduct);
 router.get("/:id", getProductById);
 

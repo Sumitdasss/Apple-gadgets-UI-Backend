@@ -1,6 +1,7 @@
 
 import mongoose from "mongoose";
 import Product from "../Model/Product.js";
+import Review from "../Model/Review.js";
 
 import {
   MainCategory,
@@ -1331,6 +1332,293 @@ export const deleteProduct = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to delete product",
+    });
+  }
+};
+
+
+
+
+
+
+
+/* =====================================================
+   CREATE REVIEW
+   POST /products/:productId/reviews
+===================================================== */
+
+export const createReview = async (req, res) => {
+  try {
+    const { productId } = req.params;
+
+    const {
+      productSlug,
+      productName,
+      name,
+      userName,
+      rating,
+      review,
+      comment,
+    } = req.body;
+
+    if (!mongoose.isValidObjectId(productId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid product ID.",
+      });
+    }
+
+    const cleanName = String(
+      name || userName || ""
+    ).trim();
+
+    const cleanReview = String(
+      review || comment || ""
+    ).trim();
+
+    const numericRating = Number(rating);
+
+    if (!cleanName || cleanName.length > 80) {
+      return res.status(400).json({
+        success: false,
+        message: "Name is required (maximum 80 characters).",
+      });
+    }
+
+    if (
+      !Number.isInteger(numericRating) ||
+      numericRating < 1 ||
+      numericRating > 5
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Rating must be between 1 and 5.",
+      });
+    }
+
+    if (
+      !cleanReview ||
+      cleanReview.length > 3000
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Review is required (maximum 3000 characters).",
+      });
+    }
+
+    const product = await Product.findById(
+      productId
+    ).select("name slug");
+
+    if (!product) {
+      return res.status(404).json({
+        success: false,
+        message: "Product not found.",
+      });
+    }
+
+    // Images have already been uploaded to Cloudinary
+    // by your existing multer-storage-cloudinary middleware.
+    const images = (req.files || []).map((file) => ({
+      url: file.path,
+      publicId: file.filename,
+    }));
+
+    const newReview = await Review.create({
+      productId: product._id,
+      productSlug: product.slug || productSlug || "",
+      productName: product.name || productName || "",
+      name: cleanName,
+      userName: cleanName,
+      rating: numericRating,
+      review: cleanReview,
+      comment: cleanReview,
+      images,
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: "Review submitted successfully.",
+      review: newReview,
+      data: newReview,
+    });
+  } catch (error) {
+    console.error("Create review error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to submit review.",
+    });
+  }
+};
+
+/* =====================================================
+   GET PRODUCT REVIEWS
+   GET /products/:productId/reviews
+===================================================== */
+
+export const getProductReviews = async (req, res) => {
+  try {
+    const { productId } = req.params;
+
+    if (!mongoose.isValidObjectId(productId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid product ID.",
+      });
+    }
+
+    const exists = await Product.exists({
+      _id: productId,
+    });
+
+    if (!exists) {
+      return res.status(404).json({
+        success: false,
+        message: "Product not found.",
+      });
+    }
+
+    const requestedPage = Number(req.query.page);
+    const requestedLimit = Number(req.query.limit);
+
+    const page =
+      Number.isInteger(requestedPage) &&
+      requestedPage > 0
+        ? requestedPage
+        : 1;
+
+    const limit =
+      Number.isInteger(requestedLimit) &&
+      requestedLimit > 0
+        ? Math.min(requestedLimit, 100)
+        : 50;
+
+    const filter = {
+      productId: new mongoose.Types.ObjectId(productId),
+    };
+
+    const [reviews, total, ratingStats] =
+      await Promise.all([
+        Review.find(filter)
+          .sort({ createdAt: -1, _id: -1 })
+          .skip((page - 1) * limit)
+          .limit(limit)
+          .lean(),
+
+        Review.countDocuments(filter),
+
+        Review.aggregate([
+          { $match: filter },
+          {
+            $group: {
+              _id: "$rating",
+              count: { $sum: 1 },
+              sum: { $sum: "$rating" },
+            },
+          },
+        ]),
+      ]);
+
+    const counts = {
+      1: 0,
+      2: 0,
+      3: 0,
+      4: 0,
+      5: 0,
+    };
+
+    let ratingSum = 0;
+
+    for (const item of ratingStats) {
+      counts[item._id] = item.count;
+      ratingSum += item.sum;
+    }
+
+    return res.status(200).json({
+      success: true,
+      reviews,
+      data: reviews,
+      total,
+      average:
+        total > 0
+          ? Number((ratingSum / total).toFixed(2))
+          : 0,
+      counts,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    });
+  } catch (error) {
+    console.error("Get product reviews error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch reviews.",
+    });
+  }
+};
+
+/* =====================================================
+   GET REVIEW SUMMARY
+   GET /products/:productId/reviews/summary
+===================================================== */
+
+export const getReviewSummary = async (req, res) => {
+  try {
+    const { productId } = req.params;
+
+    if (!mongoose.isValidObjectId(productId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid product ID.",
+      });
+    }
+
+    const summary = await Review.aggregate([
+      {
+        $match: {
+          productId: new mongoose.Types.ObjectId(productId),
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          total: { $sum: 1 },
+          average: { $avg: "$rating" },
+          ratings: { $push: "$rating" },
+        },
+      },
+    ]);
+
+    const result = summary[0];
+
+    const counts = {
+      1: 0,
+      2: 0,
+      3: 0,
+      4: 0,
+      5: 0,
+    };
+
+    for (const rating of result?.ratings || []) {
+      counts[rating] += 1;
+    }
+
+    return res.status(200).json({
+      success: true,
+      total: result?.total || 0,
+      average: result
+        ? Number(result.average.toFixed(2))
+        : 0,
+      counts,
+    });
+  } catch (error) {
+    console.error("Review summary error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch review summary.",
     });
   }
 };

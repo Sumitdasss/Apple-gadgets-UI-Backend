@@ -753,7 +753,7 @@ export const getPublishedOffers = async (req, res) => {
       "sections.type": "offers",
     }).lean();
 
-    const offers = pages.flatMap((page) =>
+    const sections = pages.flatMap((page) =>
       (page.sections || [])
         .filter((section) => section.type === "offers")
         .map((section) => ({
@@ -763,13 +763,22 @@ export const getPublishedOffers = async (req, res) => {
         }))
     );
 
+    const offers = sections.flatMap((section) =>
+      (section.offers || []).map((offer) => ({
+        ...offer,
+        pageSlug: section.pageSlug,
+        pageTitle: section.pageTitle,
+        sectionTitle: section.title,
+      }))
+    );
+
     return res.status(200).json({
       success: true,
       count: offers.length,
       data: offers,
     });
   } catch (error) {
-    console.error("Get published offers error:", error);
+    console.error("getPublishedOffers error:", error);
 
     return res.status(500).json({
       success: false,

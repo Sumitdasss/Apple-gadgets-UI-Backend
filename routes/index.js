@@ -127,14 +127,17 @@ router.delete("/deleteCustomer/:id", deleteCustomer);
 router.patch("/updateCustomerRole/:id", updateCustomerRole);
 router.get("/:productId/reviews/summary", getReviewSummary);
 router.get("/:productId/reviews", getProductReviews);
-router.get("/public/:slug", getPublishedLandingPage);
 
-// Admin routes
-router.get("/getLandingPages",  getLandingPages);
 router.get(
   "/published/banners",
   getPublishedLandingPageBanners
 );
+router.get("/public/offers", getPublishedOffers);
+router.get("/public/:slug", getPublishedLandingPage);
+
+// Admin routes
+router.get("/getLandingPages",  getLandingPages);
+
 
 router.post(
   "/createLandingPage",
@@ -155,7 +158,7 @@ router.patch(
   
   setLandingPageStatus
 );
-router.get("/public/offers", getPublishedOffers);
+
 router.delete("/deleteLandingPage/:id",  deleteLandingPage);
 
 

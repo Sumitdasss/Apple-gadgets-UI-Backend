@@ -1,4 +1,3 @@
-
 import mongoose from "mongoose";
 import LandingPage from "../Model/LandingPage.js";
 
@@ -34,7 +33,7 @@ const getUploadedFiles = (req, fieldName) =>
 const getFileUrl = (file) =>
   file?.path || file?.secure_url || file?.url || "";
 
-// Normalize sections.
+// Normalize sections (updated with offers support).
 const normalizeSections = (sections) => {
   if (sections === undefined) return undefined;
 
@@ -57,6 +56,7 @@ const normalizeSections = (sections) => {
       buttonText: section.buttonText || "",
       buttonLink: section.buttonLink || "",
 
+      // Banners
       banners: Array.isArray(section.banners)
         ? section.banners.map((banner) => ({
             ...(banner?._id && { _id: banner._id }),
@@ -66,6 +66,7 @@ const normalizeSections = (sections) => {
           }))
         : [],
 
+      // Product IDs
       productIds: Array.isArray(section.productIds)
         ? section.productIds.map((product) => {
             const productId =
@@ -81,6 +82,7 @@ const normalizeSections = (sections) => {
           })
         : [],
 
+      // Features
       features: Array.isArray(section.features)
         ? section.features.map((feature) => {
             if (typeof feature === "string") {
@@ -97,6 +99,19 @@ const normalizeSections = (sections) => {
               icon: feature?.icon || "",
             };
           })
+        : [],
+
+      // Offers (Latest Offers section)
+      offers: Array.isArray(section.offers)
+        ? section.offers.map((offer) => ({
+            ...(offer?._id && { _id: offer._id }),
+            title: offer?.title || "",
+            image: offer?.image || "",
+            link: offer?.link || "",
+            alt: offer?.alt || "",
+            endDate: offer?.endDate ? new Date(offer.endDate) : undefined,
+            buttonText: offer?.buttonText || "View Details",
+          }))
         : [],
     };
   });
@@ -117,13 +132,15 @@ const normalizeSeo = (seo) => {
   };
 };
 
-// Apply uploaded section and banner images.
+// Apply uploaded section, banner and offer images.
 const applyUploadedImages = (sections, req) => {
   if (!Array.isArray(sections)) return sections;
 
   const sectionFiles = getUploadedFiles(req, "sectionImages");
   const bannerFiles = getUploadedFiles(req, "bannerImages");
+  const offerFiles = getUploadedFiles(req, "offerImages");
 
+  // ---------- Section Images ----------
   const rawSectionIndexes = parseJSONField(
     req.body.sectionImageIndexes,
     "sectionImageIndexes"
@@ -151,6 +168,7 @@ const applyUploadedImages = (sections, req) => {
     sections[sectionIndex].image = url;
   });
 
+  // ---------- Banner Images ----------
   const rawBannerIndexes = parseJSONField(
     req.body.bannerFileIndexes,
     "bannerFileIndexes"
@@ -160,7 +178,6 @@ const applyUploadedImages = (sections, req) => {
     ? rawBannerIndexes
     : [];
 
-  // Find the banner section. Upload indexes refer to its banners array.
   const bannerSection = sections.find(
     (section) => section.type === "banner"
   );
@@ -188,6 +205,46 @@ const applyUploadedImages = (sections, req) => {
     }
 
     bannerSection.banners[bannerIndex].image = url;
+  });
+
+  // ---------- Offer Images ----------
+  const rawOfferIndexes = parseJSONField(
+    req.body.offerFileIndexes,
+    "offerFileIndexes"
+  );
+
+  const offerFileIndexes = Array.isArray(rawOfferIndexes)
+    ? rawOfferIndexes
+    : [];
+
+  // Find the offers section
+  const offersSection = sections.find(
+    (section) => section.type === "offers"
+  );
+
+  if (offerFiles.length > 0 && !offersSection) {
+    throw new Error("Offers section is missing");
+  }
+
+  offerFiles.forEach((file, fileIndex) => {
+    const url = getFileUrl(file);
+
+    if (!url) {
+      throw new Error("Uploaded offer image URL is missing");
+    }
+
+    const offerIndex = Number(
+      offerFileIndexes[fileIndex] ?? fileIndex
+    );
+
+    if (
+      !Number.isInteger(offerIndex) ||
+      !offersSection?.offers?.[offerIndex]
+    ) {
+      throw new Error(`Invalid offer image index: ${offerIndex}`);
+    }
+
+    offersSection.offers[offerIndex].image = url;
   });
 
   return sections;
@@ -220,16 +277,20 @@ const handleControllerError = (res, error, fallbackMessage) => {
     "seo must contain valid JSON",
     "sectionImageIndexes must contain valid JSON",
     "bannerFileIndexes must contain valid JSON",
+    "offerFileIndexes must contain valid JSON",
     "Uploaded section image URL is missing",
     "Uploaded banner image URL is missing",
+    "Uploaded offer image URL is missing",
     "Banner section is missing",
+    "Offers section is missing",
   ];
 
   const isClientError =
     clientErrorMessages.includes(error.message) ||
     error.message?.startsWith("Invalid product ID:") ||
     error.message?.startsWith("Invalid section image index:") ||
-    error.message?.startsWith("Invalid banner image index:");
+    error.message?.startsWith("Invalid banner image index:") ||
+    error.message?.startsWith("Invalid offer image index:");
 
   if (isClientError) {
     return res.status(400).json({
@@ -436,10 +497,12 @@ export const updateLandingPage = async (req, res) => {
         sections = sections.map((section, index) => {
           const oldSection = existingPage.sections?.[index];
 
+          // Keep old section image if new one is not provided
           if (!section.image && oldSection?.image) {
             section.image = oldSection.image;
           }
 
+          // Keep old banner images
           if (
             section.type === "banner" &&
             oldSection?.type === "banner"
@@ -455,6 +518,22 @@ export const updateLandingPage = async (req, res) => {
             );
           }
 
+          // Keep old offer images
+          if (
+            section.type === "offers" &&
+            oldSection?.type === "offers"
+          ) {
+            section.offers = section.offers.map(
+              (offer, offerIndex) => ({
+                ...offer,
+                image:
+                  offer.image ||
+                  oldSection.offers?.[offerIndex]?.image ||
+                  "",
+              })
+            );
+          }
+
           return section;
         });
       }
@@ -462,7 +541,8 @@ export const updateLandingPage = async (req, res) => {
       updates.sections = applyUploadedImages(sections, req);
     } else if (
       getUploadedFiles(req, "sectionImages").length ||
-      getUploadedFiles(req, "bannerImages").length
+      getUploadedFiles(req, "bannerImages").length ||
+      getUploadedFiles(req, "offerImages").length
     ) {
       return res.status(400).json({
         success: false,

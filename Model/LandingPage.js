@@ -1,5 +1,33 @@
-
 import mongoose from "mongoose";
+
+const offerItemSchema = new mongoose.Schema(
+  {
+    title: {
+      type: String,
+      default: "",
+    },
+    image: {
+      type: String,
+      default: "",
+    },
+    link: {
+      type: String,
+      default: "",
+    },
+    alt: {
+      type: String,
+      default: "",
+    },
+    endDate: {
+      type: Date, // Countdown timer এর জন্য
+    },
+    buttonText: {
+      type: String,
+      default: "View Details",
+    },
+  },
+  { _id: true }
+);
 
 const landingSectionSchema = new mongoose.Schema(
   {
@@ -12,41 +40,36 @@ const landingSectionSchema = new mongoose.Schema(
         "banner",
         "testimonials",
         "cta",
+        "offers", // Latest Offers সেকশনের জন্য
       ],
       required: true,
     },
-
     title: {
       type: String,
       default: "",
     },
-
     subtitle: {
       type: String,
       default: "",
     },
-
     description: {
       type: String,
       default: "",
     },
-
     image: {
       type: String,
       default: "",
     },
-
     buttonText: {
       type: String,
       default: "",
     },
-
     buttonLink: {
       type: String,
       default: "",
     },
 
-    // Optional banner images with clickable links
+    // Banner images (hero / banner section এর জন্য)
     banners: [
       {
         image: {
@@ -64,6 +87,7 @@ const landingSectionSchema = new mongoose.Schema(
       },
     ],
 
+    // Product section এর জন্য
     productIds: [
       {
         type: mongoose.Schema.Types.ObjectId,
@@ -71,6 +95,7 @@ const landingSectionSchema = new mongoose.Schema(
       },
     ],
 
+    // Features section এর জন্য
     features: [
       {
         title: { type: String, default: "" },
@@ -78,8 +103,11 @@ const landingSectionSchema = new mongoose.Schema(
         icon: { type: String, default: "" },
       },
     ],
+
+    // Latest Offers section এর জন্য
+    offers: [offerItemSchema],
   },
-  { _id: true },
+  { _id: true }
 );
 
 const landingPageSchema = new mongoose.Schema(
@@ -89,7 +117,6 @@ const landingPageSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
-
     slug: {
       type: String,
       required: true,
@@ -98,36 +125,31 @@ const landingPageSchema = new mongoose.Schema(
       trim: true,
       match: /^[a-z0-9]+(?:-[a-z0-9]+)*$/,
     },
-
     description: {
       type: String,
       default: "",
     },
-
     status: {
       type: String,
       enum: ["draft", "published", "archived"],
       default: "draft",
       index: true,
     },
-
     sections: {
       type: [landingSectionSchema],
       default: [],
     },
-
     seo: {
       metaTitle: { type: String, default: "" },
       metaDescription: { type: String, default: "" },
       ogImage: { type: String, default: "" },
     },
-
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Customer",
     },
   },
-  { timestamps: true },
+  { timestamps: true }
 );
 
 landingPageSchema.index({ status: 1, updatedAt: -1 });

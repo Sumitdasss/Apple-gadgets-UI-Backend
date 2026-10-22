@@ -746,31 +746,39 @@ export const getPublishedLandingPageBanners = async (req, res) => {
   }
 };
 
+
 export const getPublishedOffers = async (req, res) => {
   try {
     const pages = await LandingPage.find({
       status: "published",
       "sections.type": "offers",
-    }).lean();
+    })
+      .select("title slug sections")
+      .lean();
 
-    const sections = pages.flatMap((page) =>
+    const offers = pages.flatMap((page) =>
       (page.sections || [])
         .filter((section) => section.type === "offers")
-        .map((section) => ({
-          ...section,
-          pageSlug: page.slug,
-          pageTitle: page.title,
-        }))
+        .flatMap((section) =>
+          (section.offers || []).map((offer) => ({
+            _id: offer._id,
+            title: offer.title || "",
+            name: offer.title || "",
+            image: offer.image || "",
+            imageUrl: offer.image || "",
+            link: offer.link || "",
+            buttonLink: offer.link || "",
+            alt: offer.alt || offer.title || "",
+            buttonText: offer.buttonText || "View Details",
+            endDate: offer.endDate || null,
+            sectionTitle: section.title || "Latest Offers",
+            pageTitle: page.title || "",
+            pageSlug: page.slug || "",
+          }))
+        )
     );
 
-    const offers = sections.flatMap((section) =>
-      (section.offers || []).map((offer) => ({
-        ...offer,
-        pageSlug: section.pageSlug,
-        pageTitle: section.pageTitle,
-        sectionTitle: section.title,
-      }))
-    );
+    res.set("Cache-Control", "no-store");
 
     return res.status(200).json({
       success: true,
@@ -782,7 +790,7 @@ export const getPublishedOffers = async (req, res) => {
 
     return res.status(500).json({
       success: false,
-      message: "Failed to fetch offers",
+      message: "Failed to fetch published offers",
     });
   }
 };

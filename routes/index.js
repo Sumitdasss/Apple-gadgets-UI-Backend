@@ -141,6 +141,7 @@ router.post(
   upload.fields([
     { name: "sectionImages", maxCount: 20 },
     { name: "bannerImages", maxCount: 20 },
+    { name: "offerImages", maxCount: 20 },
   ]),
   createLandingPage,
 );

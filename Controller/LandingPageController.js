@@ -3,12 +3,25 @@ import LandingPage from "../Model/LandingPage.js";
 
 const validId = (id) => mongoose.isValidObjectId(id);
 
-const slugify = (value = "") =>
-  String(value)
-    .trim()
+
+const slugify = (value = "") => {
+  let text = String(value).trim();
+
+  // URL-encoded title decode করা
+  try {
+    text = decodeURIComponent(text);
+  } catch {
+    // Encoding invalid হলে original text ব্যবহার করবে
+  }
+
+  return text
+    .replace(/%/g, " percent ")
     .toLowerCase()
+    .trim()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
+};
+
 
 // Parse JSON fields from FormData or accept objects/arrays.
 const parseJSONField = (value, fieldName) => {

@@ -19,12 +19,20 @@ const offerItemSchema = new mongoose.Schema(
       default: "",
     },
     endDate: {
-      type: Date, // Countdown timer এর জন্য
+      type: Date,
     },
     buttonText: {
       type: String,
       default: "View Details",
     },
+
+    // ✅ Related products for this offer
+    productIds: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Product",
+      },
+    ],
   },
   { _id: true }
 );
@@ -40,7 +48,7 @@ const landingSectionSchema = new mongoose.Schema(
         "banner",
         "testimonials",
         "cta",
-        "offers", // Latest Offers সেকশনের জন্য
+        "offers",
       ],
       required: true,
     },
@@ -69,25 +77,14 @@ const landingSectionSchema = new mongoose.Schema(
       default: "",
     },
 
-    // Banner images (hero / banner section এর জন্য)
     banners: [
       {
-        image: {
-          type: String,
-          default: "",
-        },
-        link: {
-          type: String,
-          default: "",
-        },
-        alt: {
-          type: String,
-          default: "",
-        },
+        image: { type: String, default: "" },
+        link: { type: String, default: "" },
+        alt: { type: String, default: "" },
       },
     ],
 
-    // Product section এর জন্য
     productIds: [
       {
         type: mongoose.Schema.Types.ObjectId,
@@ -95,7 +92,6 @@ const landingSectionSchema = new mongoose.Schema(
       },
     ],
 
-    // Features section এর জন্য
     features: [
       {
         title: { type: String, default: "" },
@@ -104,7 +100,6 @@ const landingSectionSchema = new mongoose.Schema(
       },
     ],
 
-    // Latest Offers section এর জন্য
     offers: [offerItemSchema],
   },
   { _id: true }

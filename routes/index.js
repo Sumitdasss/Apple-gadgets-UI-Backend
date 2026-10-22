@@ -32,7 +32,7 @@ import { bulkUpdateOrders, deleteOrder, getOrders, updateOrder } from "../Contro
 import { deleteCustomer, getAllCustomers, getCustomerById, getMyProfile, login, register, resendEmailOtp, updateCustomerRole, updateCustomerStatus, verifyEmailOtp, verifyLoginOtp } from "../Controller/AuthController.js";
 import { verifyToken } from "../Middleware/authMiddleware.js";
 import { authorizeRoles } from "../Middleware/roleMiddleware.js";
-import { createLandingPage, deleteLandingPage, getLandingPageById, getLandingPages, getPublishedLandingPage, getPublishedLandingPageBanners, setLandingPageStatus, updateLandingPage } from "../Controller/LandingPageController.js";
+import { createLandingPage, deleteLandingPage, getLandingPageById, getLandingPages, getPublishedLandingPage, getPublishedLandingPageBanners, getPublishedOffers, setLandingPageStatus, updateLandingPage } from "../Controller/LandingPageController.js";
 const router = express.Router();
 
 router.post(
@@ -155,7 +155,7 @@ router.patch(
   
   setLandingPageStatus
 );
-
+router.get("/public/offers", getPublishedOffers);
 router.delete("/deleteLandingPage/:id",  deleteLandingPage);
 
 

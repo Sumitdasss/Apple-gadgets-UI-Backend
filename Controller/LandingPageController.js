@@ -745,3 +745,35 @@ export const getPublishedLandingPageBanners = async (req, res) => {
     });
   }
 };
+
+export const getPublishedOffers = async (req, res) => {
+  try {
+    const pages = await LandingPage.find({
+      status: "published",
+      "sections.type": "offers",
+    }).lean();
+
+    const offers = pages.flatMap((page) =>
+      (page.sections || [])
+        .filter((section) => section.type === "offers")
+        .map((section) => ({
+          ...section,
+          pageSlug: page.slug,
+          pageTitle: page.title,
+        }))
+    );
+
+    return res.status(200).json({
+      success: true,
+      count: offers.length,
+      data: offers,
+    });
+  } catch (error) {
+    console.error("Get published offers error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch offers",
+    });
+  }
+};

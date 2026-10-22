@@ -1,3 +1,4 @@
+
 import mongoose from "mongoose";
 import LandingPage from "../Model/LandingPage.js";
 
@@ -9,7 +10,7 @@ const slugify = (value = "") => {
   try {
     text = decodeURIComponent(text);
   } catch {
-    // ignore
+    // Keep the original text if decoding fails.
   }
 
   return text
@@ -36,26 +37,29 @@ const parseJSONField = (value, fieldName) => {
   }
 };
 
-const getUploadedFiles = (req, fieldName) => req.files?.[fieldName] || [];
+const getUploadedFiles = (req, fieldName) =>
+  req.files?.[fieldName] || [];
 
 const getFileUrl = (file) =>
   file?.path || file?.secure_url || file?.url || "";
 
-// Normalize productIds array
 const normalizeProductIds = (list) => {
   if (!Array.isArray(list)) return [];
 
   return list
     .map((item) => {
       if (typeof item === "string") return item;
-      if (item && typeof item === "object") return item._id || item.id;
+
+      if (item && typeof item === "object") {
+        return item._id || item.id;
+      }
+
       return null;
     })
-    .filter((id) => validId(id))
+    .filter((id) => id && validId(id))
     .map((id) => String(id));
 };
 
-// Normalize sections
 const normalizeSections = (sections) => {
   if (sections === undefined) return undefined;
 
@@ -64,13 +68,18 @@ const normalizeSections = (sections) => {
   }
 
   return sections.map((section) => {
-    if (!section || typeof section !== "object" || Array.isArray(section)) {
+    if (
+      !section ||
+      typeof section !== "object" ||
+      Array.isArray(section)
+    ) {
       throw new Error("Invalid section data");
     }
 
     return {
       ...(section._id && { _id: section._id }),
-      type: section.type,
+
+      type: String(section.type || "").trim().toLowerCase(),
       title: section.title || "",
       subtitle: section.subtitle || "",
       description: section.description || "",
@@ -92,8 +101,13 @@ const normalizeSections = (sections) => {
       features: Array.isArray(section.features)
         ? section.features.map((feature) => {
             if (typeof feature === "string") {
-              return { title: feature, description: "", icon: "" };
+              return {
+                title: feature,
+                description: "",
+                icon: "",
+              };
             }
+
             return {
               title: feature?.title || "",
               description: feature?.description || "",
@@ -102,7 +116,6 @@ const normalizeSections = (sections) => {
           })
         : [],
 
-      // ✅ Offers — productIds সহ
       offers: Array.isArray(section.offers)
         ? section.offers.map((offer) => ({
             ...(offer?._id && { _id: offer._id }),
@@ -110,7 +123,9 @@ const normalizeSections = (sections) => {
             image: offer?.image || "",
             link: offer?.link || "",
             alt: offer?.alt || "",
-            endDate: offer?.endDate ? new Date(offer.endDate) : undefined,
+            endDate: offer?.endDate
+              ? new Date(offer.endDate)
+              : undefined,
             buttonText: offer?.buttonText || "View Details",
             productIds: normalizeProductIds(offer?.productIds),
           }))
@@ -145,74 +160,123 @@ const applyUploadedImages = (sections, req) => {
     req.body.sectionImageIndexes,
     "sectionImageIndexes"
   );
+
   const sectionImageIndexes = Array.isArray(rawSectionIndexes)
     ? rawSectionIndexes
     : [];
 
   sectionFiles.forEach((file, fileIndex) => {
     const url = getFileUrl(file);
-    if (!url) throw new Error("Uploaded section image URL is missing");
 
-    const sectionIndex = Number(sectionImageIndexes[fileIndex] ?? fileIndex);
-    if (!Number.isInteger(sectionIndex) || !sections[sectionIndex]) {
-      throw new Error(`Invalid section image index: ${sectionIndex}`);
+    if (!url) {
+      throw new Error("Uploaded section image URL is missing");
     }
+
+    const sectionIndex = Number(
+      sectionImageIndexes[fileIndex] ?? fileIndex
+    );
+
+    if (
+      !Number.isInteger(sectionIndex) ||
+      !sections[sectionIndex]
+    ) {
+      throw new Error(
+        `Invalid section image index: ${sectionIndex}`
+      );
+    }
+
     sections[sectionIndex].image = url;
   });
 
-  // Banner images
+  // Banner images: use banner section index if supplied.
   const rawBannerIndexes = parseJSONField(
     req.body.bannerFileIndexes,
     "bannerFileIndexes"
   );
+
   const bannerFileIndexes = Array.isArray(rawBannerIndexes)
     ? rawBannerIndexes
     : [];
 
-  const bannerSection = sections.find((s) => s.type === "banner");
-  if (bannerFiles.length > 0 && !bannerSection) {
+  const bannerSectionIndex = Number(
+    req.body.bannerSectionIndex ?? -1
+  );
+
+  const bannerSection =
+    bannerSectionIndex >= 0
+      ? sections[bannerSectionIndex]
+      : sections.find((section) => section.type === "banner");
+
+  if (bannerFiles.length && !bannerSection) {
     throw new Error("Banner section is missing");
   }
 
   bannerFiles.forEach((file, fileIndex) => {
     const url = getFileUrl(file);
-    if (!url) throw new Error("Uploaded banner image URL is missing");
 
-    const bannerIndex = Number(bannerFileIndexes[fileIndex] ?? fileIndex);
+    if (!url) {
+      throw new Error("Uploaded banner image URL is missing");
+    }
+
+    const bannerIndex = Number(
+      bannerFileIndexes[fileIndex] ?? fileIndex
+    );
+
     if (
       !Number.isInteger(bannerIndex) ||
       !bannerSection?.banners?.[bannerIndex]
     ) {
-      throw new Error(`Invalid banner image index: ${bannerIndex}`);
+      throw new Error(
+        `Invalid banner image index: ${bannerIndex}`
+      );
     }
+
     bannerSection.banners[bannerIndex].image = url;
   });
 
-  // Offer images
+  // Offer images: use offers section index if supplied.
   const rawOfferIndexes = parseJSONField(
     req.body.offerFileIndexes,
     "offerFileIndexes"
   );
+
   const offerFileIndexes = Array.isArray(rawOfferIndexes)
     ? rawOfferIndexes
     : [];
 
-  const offersSection = sections.find((s) => s.type === "offers");
-  if (offerFiles.length > 0 && !offersSection) {
+  const offersSectionIndex = Number(
+    req.body.offersSectionIndex ?? -1
+  );
+
+  const offersSection =
+    offersSectionIndex >= 0
+      ? sections[offersSectionIndex]
+      : sections.find((section) => section.type === "offers");
+
+  if (offerFiles.length && !offersSection) {
     throw new Error("Offers section is missing");
   }
 
   offerFiles.forEach((file, fileIndex) => {
     const url = getFileUrl(file);
-    if (!url) throw new Error("Uploaded offer image URL is missing");
 
-    const offerIndex = Number(offerFileIndexes[fileIndex] ?? fileIndex);
+    if (!url) {
+      throw new Error("Uploaded offer image URL is missing");
+    }
+
+    const offerIndex = Number(
+      offerFileIndexes[fileIndex] ?? fileIndex
+    );
+
     if (
       !Number.isInteger(offerIndex) ||
       !offersSection?.offers?.[offerIndex]
     ) {
-      throw new Error(`Invalid offer image index: ${offerIndex}`);
+      throw new Error(
+        `Invalid offer image index: ${offerIndex}`
+      );
     }
+
     offersSection.offers[offerIndex].image = url;
   });
 
@@ -227,7 +291,11 @@ const handleControllerError = (res, error, fallbackMessage) => {
     });
   }
 
-  if (error.name === "ValidationError" || error.name === "CastError") {
+  if (
+    error.name === "ValidationError" ||
+    error.name === "CastError" ||
+    error.name === "StrictPopulateError"
+  ) {
     return res.status(400).json({
       success: false,
       message: error.message,
@@ -252,7 +320,6 @@ const handleControllerError = (res, error, fallbackMessage) => {
 
   const isClientError =
     clientErrorMessages.includes(error.message) ||
-    error.message?.startsWith("Invalid product ID:") ||
     error.message?.startsWith("Invalid section image index:") ||
     error.message?.startsWith("Invalid banner image index:") ||
     error.message?.startsWith("Invalid offer image index:");
@@ -272,7 +339,7 @@ const handleControllerError = (res, error, fallbackMessage) => {
   });
 };
 
-// ADMIN: Create
+// ADMIN: Create landing page
 export const createLandingPage = async (req, res) => {
   try {
     const { title, slug, description, status } = req.body;
@@ -285,6 +352,7 @@ export const createLandingPage = async (req, res) => {
     }
 
     const finalSlug = slugify(slug || title);
+
     if (!finalSlug) {
       return res.status(400).json({
         success: false,
@@ -326,16 +394,24 @@ export const createLandingPage = async (req, res) => {
       data: page,
     });
   } catch (error) {
-    return handleControllerError(res, error, "Failed to create landing page");
+    return handleControllerError(
+      res,
+      error,
+      "Failed to create landing page"
+    );
   }
 };
 
-// ADMIN: List
+// ADMIN: List landing pages
+// IMPORTANT: Do not exclude sections.
+// Only return section type and the fields needed by the list.
 export const getLandingPages = async (req, res) => {
   try {
     const pages = await LandingPage.find()
+      .select(
+        "title slug description status sections.type createdAt updatedAt"
+      )
       .sort({ updatedAt: -1 })
-      .select("-sections")
       .lean();
 
     return res.status(200).json({
@@ -344,11 +420,15 @@ export const getLandingPages = async (req, res) => {
       data: pages,
     });
   } catch (error) {
-    return handleControllerError(res, error, "Failed to fetch landing pages");
+    return handleControllerError(
+      res,
+      error,
+      "Failed to fetch landing pages"
+    );
   }
 };
 
-// ADMIN: Get by ID
+// ADMIN: Get landing page by ID
 export const getLandingPageById = async (req, res) => {
   try {
     const { id } = req.params;
@@ -374,11 +454,15 @@ export const getLandingPageById = async (req, res) => {
       data: page,
     });
   } catch (error) {
-    return handleControllerError(res, error, "Failed to fetch landing page");
+    return handleControllerError(
+      res,
+      error,
+      "Failed to fetch landing page"
+    );
   }
 };
 
-// ADMIN: Update
+// ADMIN: Update landing page
 export const updateLandingPage = async (req, res) => {
   try {
     const { id } = req.params;
@@ -403,23 +487,29 @@ export const updateLandingPage = async (req, res) => {
     const updates = {};
 
     if (body.title !== undefined) {
-      if (typeof body.title !== "string" || !body.title.trim()) {
+      if (
+        typeof body.title !== "string" ||
+        !body.title.trim()
+      ) {
         return res.status(400).json({
           success: false,
           message: "Title cannot be empty",
         });
       }
+
       updates.title = body.title.trim();
     }
 
     if (body.slug !== undefined) {
       const finalSlug = slugify(body.slug);
+
       if (!finalSlug) {
         return res.status(400).json({
           success: false,
           message: "A valid slug is required",
         });
       }
+
       updates.slug = finalSlug;
     }
 
@@ -428,12 +518,15 @@ export const updateLandingPage = async (req, res) => {
     }
 
     if (body.status !== undefined) {
-      if (!["draft", "published", "archived"].includes(body.status)) {
+      if (
+        !["draft", "published", "archived"].includes(body.status)
+      ) {
         return res.status(400).json({
           success: false,
           message: "Invalid status",
         });
       }
+
       updates.status = body.status;
     }
 
@@ -445,29 +538,41 @@ export const updateLandingPage = async (req, res) => {
         sections = sections.map((section, index) => {
           const oldSection = existingPage.sections?.[index];
 
+          // Preserve existing section image.
           if (!section.image && oldSection?.image) {
             section.image = oldSection.image;
           }
 
-          if (section.type === "banner" && oldSection?.type === "banner") {
-            section.banners = section.banners.map((banner, bannerIndex) => ({
-              ...banner,
-              image:
-                banner.image ||
-                oldSection.banners?.[bannerIndex]?.image ||
-                "",
-            }));
+          // Preserve existing banner images by index.
+          if (
+            section.type === "banner" &&
+            oldSection?.type === "banner"
+          ) {
+            section.banners = section.banners.map(
+              (banner, bannerIndex) => ({
+                ...banner,
+                image:
+                  banner.image ||
+                  oldSection.banners?.[bannerIndex]?.image ||
+                  "",
+              })
+            );
           }
 
-          if (section.type === "offers" && oldSection?.type === "offers") {
-            section.offers = section.offers.map((offer, offerIndex) => ({
-              ...offer,
-              image:
-                offer.image ||
-                oldSection.offers?.[offerIndex]?.image ||
-                "",
-              // productIds already set by normalizeSections
-            }));
+          // Preserve existing offer images by index.
+          if (
+            section.type === "offers" &&
+            oldSection?.type === "offers"
+          ) {
+            section.offers = section.offers.map(
+              (offer, offerIndex) => ({
+                ...offer,
+                image:
+                  offer.image ||
+                  oldSection.offers?.[offerIndex]?.image ||
+                  "",
+              })
+            );
           }
 
           return section;
@@ -487,14 +592,16 @@ export const updateLandingPage = async (req, res) => {
     }
 
     if (body.seo !== undefined) {
-      updates.seo = normalizeSeo(parseJSONField(body.seo, "seo"));
+      updates.seo = normalizeSeo(
+        parseJSONField(body.seo, "seo")
+      );
     }
 
     const page = await LandingPage.findByIdAndUpdate(
       id,
       { $set: updates },
       {
-        returnDocument: "after",
+        new: true,
         runValidators: true,
       }
     );
@@ -505,11 +612,15 @@ export const updateLandingPage = async (req, res) => {
       data: page,
     });
   } catch (error) {
-    return handleControllerError(res, error, "Failed to update landing page");
+    return handleControllerError(
+      res,
+      error,
+      "Failed to update landing page"
+    );
   }
 };
 
-// ADMIN: Delete
+// ADMIN: Delete landing page
 export const deleteLandingPage = async (req, res) => {
   try {
     const { id } = req.params;
@@ -535,11 +646,15 @@ export const deleteLandingPage = async (req, res) => {
       message: "Landing page deleted successfully",
     });
   } catch (error) {
-    return handleControllerError(res, error, "Failed to delete landing page");
+    return handleControllerError(
+      res,
+      error,
+      "Failed to delete landing page"
+    );
   }
 };
 
-// ADMIN: Status
+// ADMIN: Change status
 export const setLandingPageStatus = async (req, res) => {
   try {
     const { id } = req.params;
@@ -563,7 +678,7 @@ export const setLandingPageStatus = async (req, res) => {
       id,
       { $set: { status } },
       {
-        returnDocument: "after",
+        new: true,
         runValidators: true,
       }
     );
@@ -589,7 +704,7 @@ export const setLandingPageStatus = async (req, res) => {
   }
 };
 
-// PUBLIC: by slug
+// PUBLIC: Get published landing page by slug
 export const getPublishedLandingPage = async (req, res) => {
   try {
     const slug = slugify(req.params.slug);
@@ -604,10 +719,15 @@ export const getPublishedLandingPage = async (req, res) => {
     const page = await LandingPage.findOne({
       slug,
       status: "published",
-    }).populate({
-      path: "sections.productIds",
-      select: "name slug price discountPrice images stock",
-    });
+    })
+      .populate({
+        path: "sections.productIds",
+        select: "name slug price discountPrice images stock",
+      })
+      .populate({
+        path: "sections.offers.productIds",
+        select: "name slug price discountPrice images stock",
+      });
 
     if (!page) {
       return res.status(404).json({
@@ -623,14 +743,20 @@ export const getPublishedLandingPage = async (req, res) => {
       data: page,
     });
   } catch (error) {
-    return handleControllerError(res, error, "Failed to load landing page");
+    return handleControllerError(
+      res,
+      error,
+      "Failed to load landing page"
+    );
   }
 };
 
-// PUBLIC: banners
+// PUBLIC: Get published banners
 export const getPublishedLandingPageBanners = async (req, res) => {
   try {
-    const pages = await LandingPage.find({ status: "published" })
+    const pages = await LandingPage.find({
+      status: "published",
+    })
       .select("title slug sections")
       .lean();
 
@@ -644,7 +770,11 @@ export const getPublishedLandingPageBanners = async (req, res) => {
               _id: banner._id,
               image: banner.image,
               link: banner.link || "",
-              alt: banner.alt || section.title || page.title || "",
+              alt:
+                banner.alt ||
+                section.title ||
+                page.title ||
+                "",
               pageTitle: page.title,
               pageSlug: page.slug,
             }))
@@ -660,6 +790,7 @@ export const getPublishedLandingPageBanners = async (req, res) => {
     });
   } catch (error) {
     console.error("Get published banners error:", error);
+
     return res.status(500).json({
       success: false,
       message: "Failed to fetch published banners",
@@ -667,7 +798,7 @@ export const getPublishedLandingPageBanners = async (req, res) => {
   }
 };
 
-// PUBLIC: offers (productIds সহ)
+// PUBLIC: Get published offers
 export const getPublishedOffers = async (req, res) => {
   try {
     const pages = await LandingPage.find({
@@ -675,6 +806,10 @@ export const getPublishedOffers = async (req, res) => {
       "sections.type": "offers",
     })
       .select("title slug sections")
+      .populate({
+        path: "sections.offers.productIds",
+        select: "name slug price discountPrice images stock",
+      })
       .lean();
 
     const offers = pages.flatMap((page) =>
@@ -692,7 +827,7 @@ export const getPublishedOffers = async (req, res) => {
             alt: offer.alt || offer.title || "",
             buttonText: offer.buttonText || "View Details",
             endDate: offer.endDate || null,
-            productIds: offer.productIds || [], // ✅
+            productIds: offer.productIds || [],
             sectionTitle: section.title || "Latest Offers",
             pageTitle: page.title || "",
             pageSlug: page.slug || "",
@@ -709,6 +844,7 @@ export const getPublishedOffers = async (req, res) => {
     });
   } catch (error) {
     console.error("getPublishedOffers error:", error);
+
     return res.status(500).json({
       success: false,
       message: "Failed to fetch published offers",

@@ -41,6 +41,7 @@ app.use("/category", router);
 app.use("/api/orders",  router);
 app.use("/api/dashboard", router);
 app.use("/api/customers", router);
+app.use("/api/landing-pages", router);
 
 
 

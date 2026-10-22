@@ -32,6 +32,7 @@ import { bulkUpdateOrders, deleteOrder, getOrders, updateOrder } from "../Contro
 import { deleteCustomer, getAllCustomers, getCustomerById, getMyProfile, login, register, resendEmailOtp, updateCustomerRole, updateCustomerStatus, verifyEmailOtp, verifyLoginOtp } from "../Controller/AuthController.js";
 import { verifyToken } from "../Middleware/authMiddleware.js";
 import { authorizeRoles } from "../Middleware/roleMiddleware.js";
+import { createLandingPage, deleteLandingPage, getLandingPageById, getLandingPages, getPublishedLandingPage, getPublishedLandingPageBanners, setLandingPageStatus, updateLandingPage } from "../Controller/LandingPageController.js";
 const router = express.Router();
 
 router.post(
@@ -126,12 +127,47 @@ router.delete("/deleteCustomer/:id", deleteCustomer);
 router.patch("/updateCustomerRole/:id", updateCustomerRole);
 router.get("/:productId/reviews/summary", getReviewSummary);
 router.get("/:productId/reviews", getProductReviews);
+router.get("/public/:slug", getPublishedLandingPage);
+
+// Admin routes
+router.get("/getLandingPages",  getLandingPages);
+router.get(
+  "/published/banners",
+  getPublishedLandingPageBanners
+);
+
+router.post(
+  "/createLandingPage",
+  upload.fields([
+    { name: "sectionImages", maxCount: 20 },
+    { name: "bannerImages", maxCount: 20 },
+  ]),
+  createLandingPage,
+);
+
+router.get("/getLandingPage/:id",  getLandingPageById);
+
+router.put("/updateLandingPage/:id",  updateLandingPage);
+
+router.patch(
+  "/updateLandingPageStatus/:id",
+  
+  setLandingPageStatus
+);
+
+router.delete("/deleteLandingPage/:id",  deleteLandingPage);
+
+
+
 
 router.post(
   "/:productId/reviews",
   upload.array("images", 5),
   createReview
 );
+
+
+
 
 
 

@@ -860,7 +860,6 @@ const getCategoryIds = async (category, level) => {
    10. GET ALL PRODUCTS WITH FILTERS
    GET /products/getALLproducts?page=1&limit=12
 ===================================================== */
-
 export const getAllProduct = async (req, res) => {
   try {
     const page = Math.max(
@@ -887,13 +886,17 @@ export const getAllProduct = async (req, res) => {
       req.query.stock
     ).toLowerCase();
 
+    // ---------- নতুন: Offer filter ----------
+    const offerQuery = cleanString(
+      req.query.offer
+    ).toLowerCase(); // true / 1 / yes
+
     const sortQuery =
       cleanString(req.query.sort) || "newest";
 
     const filter = {};
 
     /* ---------- CATEGORY FILTER ---------- */
-
     if (categoryQuery) {
       const found = await findCategoryBySlug(categoryQuery);
 
@@ -952,7 +955,6 @@ export const getAllProduct = async (req, res) => {
     }
 
     /* ---------- BRAND FILTER ---------- */
-
     if (brandQuery) {
       filter.brand = {
         $in: brandQuery
@@ -963,7 +965,6 @@ export const getAllProduct = async (req, res) => {
     }
 
     /* ---------- PRICE FILTER ---------- */
-
     if (
       req.query.minPrice !== undefined ||
       req.query.maxPrice !== undefined
@@ -1009,7 +1010,6 @@ export const getAllProduct = async (req, res) => {
     }
 
     /* ---------- STOCK FILTER ---------- */
-
     if (stockQuery === "in-stock") {
       filter.stock = { $gt: 0 };
     }
@@ -1018,11 +1018,39 @@ export const getAllProduct = async (req, res) => {
       filter.stock = { $lte: 0 };
     }
 
+    /* ---------- OFFER FILTER (নতুন) ---------- */
+    // offer=true হলে শুধু যেগুলোর discountPrice < price আছে সেগুলো
+    if (
+      offerQuery === "true" ||
+      offerQuery === "1" ||
+      offerQuery === "yes"
+    ) {
+      // যদি আগে থেকে $expr থাকে (price filter), তাহলে merge করো
+      if (filter.$expr) {
+        filter.$expr = {
+          $and: [
+            filter.$expr,
+            { $lt: ["$discountPrice", "$price"] },
+            { $gt: ["$discountPrice", 0] }, // discountPrice আছে কিনা
+          ],
+        };
+      } else {
+        filter.$expr = {
+          $and: [
+            { $lt: ["$discountPrice", "$price"] },
+            { $gt: ["$discountPrice", 0] },
+          ],
+        };
+      }
+
+      // অতিরিক্ত নিরাপত্তা (optional)
+      // filter.discountPercentage = { $gt: 0 };
+    }
+
     const sortOption =
       sortOptions[sortQuery] || sortOptions.newest;
 
     /* ---------- DATABASE QUERIES ---------- */
-
     const [products, total, facetRows] = await Promise.all([
       Product.find(filter)
         .select("-__v")
@@ -1038,7 +1066,6 @@ export const getAllProduct = async (req, res) => {
 
       Product.countDocuments(filter),
 
-      // Collect available filter values from matching products.
       Product.aggregate([
         { $match: filter },
         {
@@ -1060,7 +1087,6 @@ export const getAllProduct = async (req, res) => {
             _id: null,
             brands: { $addToSet: "$brand" },
             series: { $addToSet: "$series" },
-
             displaySizes: {
               $addToSet: {
                 $ifNull: [
@@ -1069,7 +1095,6 @@ export const getAllProduct = async (req, res) => {
                 ],
               },
             },
-
             processors: { $addToSet: "$processor" },
             colors: { $push: "$colors" },
             variants: { $push: "$variants" },
@@ -1083,7 +1108,6 @@ export const getAllProduct = async (req, res) => {
     const facet = facetRows[0] || {};
 
     /* ---------- STORAGE OPTIONS ---------- */
-
     const storageValues = [
       ...(facet.storageFields || []).flatMap((value) =>
         Array.isArray(value)
@@ -1092,7 +1116,6 @@ export const getAllProduct = async (req, res) => {
             ? [value]
             : []
       ),
-
       ...(facet.variants || []).flatMap((variants) =>
         Array.isArray(variants)
           ? variants
@@ -1103,7 +1126,6 @@ export const getAllProduct = async (req, res) => {
     ];
 
     /* ---------- COLOR OPTIONS ---------- */
-
     const colorValues = (facet.colors || []).flatMap(
       (colors) =>
         Array.isArray(colors)
@@ -1116,11 +1138,9 @@ export const getAllProduct = async (req, res) => {
     );
 
     /* ---------- PRICE RANGE ---------- */
-
     const validPrices = (facet.prices || []).filter(
       (price) =>
-        typeof price === "number" &&
-        Number.isFinite(price)
+        typeof price === "number" && Number.isFinite(price)
     );
 
     const selected = categoryQuery
@@ -1128,7 +1148,6 @@ export const getAllProduct = async (req, res) => {
       : null;
 
     /* ---------- RESPONSE ---------- */
-
     return res.status(200).json({
       success: true,
       count: products.length,
@@ -1158,16 +1177,12 @@ export const getAllProduct = async (req, res) => {
           facet.displaySizes || []
         ),
         storage: uniqueStrings(storageValues),
-        processors: uniqueStrings(
-          facet.processors || []
-        ),
+        processors: uniqueStrings(facet.processors || []),
         colors: uniqueStrings(colorValues),
-
         price: {
           min: validPrices.length
             ? Math.min(...validPrices)
             : 0,
-
           max: validPrices.length
             ? Math.max(...validPrices)
             : 0,

@@ -1637,3 +1637,129 @@ export const getReviewSummary = async (req, res) => {
     });
   }
 };
+
+
+// GET /products/desktop-products
+// আলাদা Desktop / PC products API
+
+export const getDesktopProducts = async (req, res) => {
+  try {
+    const page = Math.max(
+      1,
+      Number.parseInt(req.query.page, 10) || 1
+    );
+
+    const limit = Math.min(
+      48,
+      Math.max(
+        1,
+        Number.parseInt(req.query.limit, 10) || 12
+      )
+    );
+
+    const skip = (page - 1) * limit;
+
+    const categorySlug = String(
+      req.query.category || "desktop-offer"
+    )
+      .trim()
+      .toLowerCase();
+
+    const filter = {};
+
+    // Category filter
+    if (categorySlug && categorySlug !== "all") {
+      const found = await findCategoryBySlug(categorySlug);
+
+      if (!found) {
+        return res.status(200).json({
+          success: true,
+          count: 0,
+          total: 0,
+          page,
+          limit,
+          totalPages: 0,
+          products: [],
+          message: `Category not found: ${categorySlug}`,
+        });
+      }
+
+      const { category, level } = found;
+      const ids = await getCategoryIds(category, level);
+
+      if (level === "main") {
+        filter.$or = [
+          { category: { $in: ids } },
+          { subCategory: { $in: ids } },
+          { childCategory: { $in: ids } },
+          { subChildCategory: { $in: ids } },
+          { additionalCategories: { $in: ids } },
+        ];
+      } else if (level === "sub") {
+        filter.$or = [
+          { subCategory: category._id },
+          { childCategory: { $in: ids } },
+          { subChildCategory: { $in: ids } },
+          { additionalCategories: { $in: ids } },
+        ];
+      } else if (level === "child") {
+        filter.$or = [
+          { childCategory: category._id },
+          { subChildCategory: { $in: ids } },
+          { additionalCategories: { $in: ids } },
+        ];
+      } else {
+        filter.$or = [
+          { subChildCategory: category._id },
+          { additionalCategories: category._id },
+        ];
+      }
+    }
+
+    // Optional: offer=true দিলে শুধু discounted products
+    const offer = String(req.query.offer || "").toLowerCase();
+
+    if (["true", "1", "yes"].includes(offer)) {
+      filter.$expr = {
+        $and: [
+          { $gt: ["$price", 0] },
+          { $gt: ["$discountPrice", 0] },
+          { $lt: ["$discountPrice", "$price"] },
+        ],
+      };
+    }
+
+    const [products, total] = await Promise.all([
+      Product.find(filter)
+        .select("-__v")
+        .populate("category", "name slug")
+        .populate("subCategory", "name slug")
+        .populate("childCategory", "name slug")
+        .populate("subChildCategory", "name slug")
+        .populate("additionalCategories", "name slug")
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+
+      Product.countDocuments(filter),
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      count: products.length,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+      products,
+    });
+  } catch (error) {
+    console.error("GET DESKTOP PRODUCTS ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch desktop products",
+    });
+  }
+};

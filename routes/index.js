@@ -10,7 +10,8 @@ import {
   deleteProduct,
   getReviewSummary,
   getProductReviews,
-  createReview
+  createReview,
+  getDesktopProducts
 } from "../Controller/addproduct.js";
 import {
   receiveWebhook,
@@ -78,6 +79,7 @@ router.patch("/bulk-update", bulkUpdateOrders);
 router.put("/orders/:id", updateOrder);
 router.delete("/orders/:id", deleteOrder);
 router.get("/Allorders", getAllOrders);
+router.get("/desktop-products", getDesktopProducts);
 
 // GET /api/orders/:orderId/navigation
 

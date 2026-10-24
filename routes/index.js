@@ -26,6 +26,7 @@ import {
   getFullCategoryTree,
   updateCategoryBanner,
 } from "../Controller/Catgorihandelar.js";
+import { categoryCacheMiddleware } from "../utils/categoryCache.js";
 import {  createOrder, getAllOrders, getOrderByOrderId, getOrderDetails, getOrderNavigation  } from "../Controller/CREATODER.js";
 import { OderActivity } from "../Controller/ShowOderactivity.js";
 import { getDashboardSummary } from "../Controller/Deshbord.js";
@@ -70,7 +71,7 @@ router.post( "/main", upload.fields([ { name: "image", maxCount: 1 }, { name: "b
 router.post( "/sub", upload.fields([ { name: "image", maxCount: 1 }, { name: "bannerImage", maxCount: 1 }, ]), createSubCategory ); 
  router.post( "/child", upload.fields([ { name: "image", maxCount: 1 }, { name: "bannerImage", maxCount: 1 }, ]), createChildCategory ); 
   router.post( "/sub-child", upload.fields([ { name: "image", maxCount: 1 }, { name: "bannerImage", maxCount: 1 }, ]), createSubChildCategory );
-router.get("/tree", getFullCategoryTree);
+router.get("/tree", categoryCacheMiddleware, getFullCategoryTree);
 router.get("/order-activity", OderActivity);
 router.get("/summary", getDashboardSummary);
 router.get("/products", getProducts);

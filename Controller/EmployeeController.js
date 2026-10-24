@@ -13,13 +13,10 @@ export const assignOrder = async (req, res) => {
       });
     }
 
-    if (
-      !mongoose.isValidObjectId(orderId) ||
-      !mongoose.isValidObjectId(employeeId)
-    ) {
+    if (!mongoose.isValidObjectId(employeeId)) {
       return res.status(400).json({
         success: false,
-        message: "Invalid orderId or employeeId",
+        message: "Invalid employeeId",
       });
     }
 
@@ -38,7 +35,16 @@ export const assignOrder = async (req, res) => {
       });
     }
 
-    const order = await Order.findById(orderId);
+    // ✅ _id অথবা custom orderId দুটো দিয়েই খুঁজবে
+    let order = null;
+
+    if (mongoose.isValidObjectId(orderId)) {
+      order = await Order.findById(orderId);
+    }
+
+    if (!order) {
+      order = await Order.findOne({ orderId: orderId });
+    }
 
     if (!order) {
       return res.status(404).json({
@@ -95,7 +101,6 @@ export const assignOrder = async (req, res) => {
     });
   }
 };
-
 export const reassignOrder = async (req, res) => {
   req.body.orderId = req.params.orderId;
   return assignOrder(req, res);

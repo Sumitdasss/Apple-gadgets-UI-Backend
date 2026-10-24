@@ -1,3 +1,4 @@
+
 import mongoose from "mongoose";
 
 const orderSchema = new mongoose.Schema(
@@ -63,21 +64,18 @@ const orderSchema = new mongoose.Schema(
     // =========================
     products: [
       {
-        // Product MongoDB ID
         product: {
           type: mongoose.Schema.Types.ObjectId,
           ref: "Product",
           required: true,
         },
 
-        // Product name snapshot
         name: {
           type: String,
           required: true,
           trim: true,
         },
 
-        // Product/Variant price at the time of order
         price: {
           type: Number,
           required: true,
@@ -91,59 +89,46 @@ const orderSchema = new mongoose.Schema(
           min: 1,
         },
 
-        // =========================
-        // PRODUCT VARIANT
-        // =========================
-
-        // Selected color
         color: {
           type: String,
           default: "",
           trim: true,
         },
 
-        // Selected RAM
         ram: {
           type: String,
           default: "",
           trim: true,
         },
 
-        // Selected Storage
         storage: {
           type: String,
           default: "",
           trim: true,
         },
 
-        // Variant MongoDB ID
         variantId: {
           type: mongoose.Schema.Types.ObjectId,
           default: null,
         },
 
-        // Variant SKU
         sku: {
           type: String,
           default: "",
           trim: true,
         },
 
-        // Old size field
-        // Kept for compatibility with old orders/products
         size: {
           type: String,
           default: "",
           trim: true,
         },
 
-        // Optional image snapshot
         image: {
           type: String,
           default: "",
         },
 
-        // Optional subtotal for this product
         subtotal: {
           type: Number,
           default: 0,
@@ -193,7 +178,11 @@ const orderSchema = new mongoose.Schema(
     // =========================
     paymentMethod: {
       type: String,
-      enum: ["cash_on_delivery", "online_payment", "partial_payment"],
+      enum: [
+        "cash_on_delivery",
+        "online_payment",
+        "partial_payment",
+      ],
       default: "cash_on_delivery",
     },
 
@@ -242,6 +231,74 @@ const orderSchema = new mongoose.Schema(
     },
 
     // =========================
+    // EMPLOYEE ASSIGNMENT
+    // =========================
+    assignedEmployee: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Customer",
+      default: null,
+    },
+
+    assignedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Customer",
+      default: null,
+    },
+
+    assignedAt: {
+      type: Date,
+      default: null,
+    },
+
+    deliveryStatus: {
+      type: String,
+      enum: [
+        "unassigned",
+        "assigned",
+        "picked_up",
+        "in_transit",
+        "delivered",
+        "failed",
+        "returned",
+        "cancelled",
+      ],
+      default: "unassigned",
+    },
+
+    deliveryNote: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+
+    deliveryHistory: [
+      {
+        status: {
+          type: String,
+          required: true,
+          trim: true,
+        },
+
+        note: {
+          type: String,
+          default: "",
+          trim: true,
+        },
+
+        updatedBy: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "Customer",
+          default: null,
+        },
+
+        updatedAt: {
+          type: Date,
+          default: Date.now,
+        },
+      },
+    ],
+
+    // =========================
     // ORDER STATUS
     // =========================
     status: {
@@ -282,8 +339,19 @@ const orderSchema = new mongoose.Schema(
     timestamps: true,
   },
 );
+
+// =========================
+// INDEXES
+// =========================
 orderSchema.index({ createdAt: -1 });
+orderSchema.index({ assignedEmployee: 1, deliveryStatus: 1 });
+orderSchema.index({ status: 1 });
+
+// =========================
+// MODEL
+// =========================
 const MainOrder =
-  mongoose.models.MainOrder || mongoose.model("MainOrder", orderSchema);
+  mongoose.models.MainOrder ||
+  mongoose.model("MainOrder", orderSchema);
 
 export default MainOrder;

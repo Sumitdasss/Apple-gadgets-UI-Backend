@@ -1,35 +1,92 @@
 
 import mongoose from "mongoose";
-import Order from "../Model/Order.js";
+import MainOrder from "../Model/MainOrder.js";
 import Customer from "../Model/Customer.js";
 
-/* ================= HELPERS ================= */
+/* =====================================================
+   HELPERS
+===================================================== */
 
-const getUserId = (req) => req.user?._id || req.user?.id || null;
+const getUserId = (req) =>
+  req.user?._id || req.user?.id || null;
 
-const getEmployeeId = (req) => getUserId(req);
+const isValidId = (id) =>
+  Boolean(id) && mongoose.isValidObjectId(id);
 
-const isValidId = (id) => mongoose.isValidObjectId(id);
+const getValidActorId = (req) => {
+  const id = getUserId(req);
+  return isValidId(id) ? id : null;
+};
 
 const normalizeText = (value, maxLength = 500) =>
   String(value ?? "").trim().slice(0, maxLength);
 
-const getValidActorId = (req) => {
-  const id = getUserId(req);
-  return id && isValidId(id) ? id : null;
-};
+const escapeRegex = (value) =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const populateOrder = async (order) => {
   await order.populate([
     { path: "customer", select: "name phone email" },
-    { path: "assignedEmployee", select: "name email phone role" },
+    {
+      path: "assignedEmployee",
+      select: "name email phone role",
+    },
     { path: "assignedBy", select: "name email role" },
   ]);
 
   return order;
 };
 
-/* ================= ASSIGN ORDER ================= */
+const findOrderByIdOrOrderNumber = async (value) => {
+  const receivedId = normalizeText(value, 150);
+
+  if (!receivedId) return null;
+
+  // First try MongoDB _id
+  if (isValidId(receivedId)) {
+    const order = await MainOrder.findById(receivedId);
+    if (order) return order;
+  }
+
+  // Then try the custom order number
+  let order = await MainOrder.findOne({
+    orderId: receivedId,
+  });
+
+  if (order) return order;
+
+  // Finally try case-insensitive custom order number
+  order = await MainOrder.findOne({
+    orderId: {
+      $regex: `^${escapeRegex(receivedId)}$`,
+      $options: "i",
+    },
+  });
+
+  return order;
+};
+
+const addDeliveryHistory = (
+  order,
+  status,
+  note,
+  actorId,
+) => {
+  if (!Array.isArray(order.deliveryHistory)) {
+    order.deliveryHistory = [];
+  }
+
+  order.deliveryHistory.push({
+    status,
+    note: normalizeText(note),
+    updatedBy: actorId,
+    updatedAt: new Date(),
+  });
+};
+
+/* =====================================================
+   ASSIGN ORDER
+===================================================== */
 
 export const assignOrder = async (req, res) => {
   try {
@@ -62,37 +119,27 @@ export const assignOrder = async (req, res) => {
       });
     }
 
-    // Find order by MongoDB _id or custom orderId.
-    const receivedOrderId = String(orderId).trim();
-
-    let order = null;
-
-    if (isValidId(receivedOrderId)) {
-      order = await Order.findById(receivedOrderId);
-    }
-
-    if (!order) {
-      order = await Order.findOne({
-        orderId: receivedOrderId,
-      });
-    }
+    const receivedOrderId = normalizeText(orderId, 150);
+    const order = await findOrderByIdOrOrderNumber(receivedOrderId);
 
     if (!order) {
       console.error("Order not found:", {
         receivedOrderId,
-        collection: Order.collection.name,
-        database: Order.db.name,
+        database: MainOrder.db.name,
+        collection: MainOrder.collection.name,
       });
 
       return res.status(404).json({
         success: false,
-        message: "Order not found",
+        message: `Order not found with ID: ${receivedOrderId}`,
       });
     }
 
     if (
       ["delivered", "cancelled"].includes(order.status) ||
-      ["delivered", "cancelled"].includes(order.deliveryStatus)
+      ["delivered", "cancelled", "returned"].includes(
+        order.deliveryStatus,
+      )
     ) {
       return res.status(409).json({
         success: false,
@@ -101,9 +148,8 @@ export const assignOrder = async (req, res) => {
     }
 
     const actorId = getValidActorId(req);
-
     const previousEmployeeId = order.assignedEmployee
-      ? String(order.assignedEmployee)
+      ? String(order.assignedEmployee._id || order.assignedEmployee)
       : null;
 
     const isReassignment =
@@ -116,15 +162,18 @@ export const assignOrder = async (req, res) => {
     order.assignedBy = actorId;
     order.assignedAt = now;
     order.deliveryStatus = "assigned";
-    order.deliveryNote = "";
+    order.deliveryNote = normalizeText(note);
 
-    order.deliveryHistory.push({
-      action: isReassignment ? "reassigned" : "assigned",
-      employee: employee._id,
-      changedBy: actorId,
-      note: normalizeText(note),
-      changedAt: now,
-    });
+    // Match the deliveryHistory schema:
+    // status, note, updatedBy, updatedAt
+    addDeliveryHistory(
+      order,
+      "assigned",
+      isReassignment
+        ? `Reassigned to ${employee.name}. ${normalizeText(note)}`
+        : normalizeText(note),
+      actorId,
+    );
 
     await order.save();
     await populateOrder(order);
@@ -150,11 +199,14 @@ export const assignOrder = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to assign order",
+      error: error.message,
     });
   }
 };
 
-/* ================= REASSIGN ORDER ================= */
+/* =====================================================
+   REASSIGN ORDER
+===================================================== */
 
 export const reassignOrder = async (req, res) => {
   req.body = {
@@ -165,43 +217,55 @@ export const reassignOrder = async (req, res) => {
   return assignOrder(req, res);
 };
 
-/* ================= EMPLOYEE ORDERS ================= */
+/* =====================================================
+   EMPLOYEE ORDERS
+===================================================== */
 
 export const getMyOrders = async (req, res) => {
   try {
-    // This endpoint still needs to identify which employee owns the orders.
-    const employeeId = getEmployeeId(req);
+    const employeeId = getUserId(req);
 
-    if (!employeeId || !isValidId(employeeId)) {
+    if (!isValidId(employeeId)) {
       return res.status(400).json({
         success: false,
         message: "Valid employee ID is missing",
       });
     }
 
-    const { page = 1, limit = 20, status } = req.query;
+    const pageNumber = Math.max(
+      1,
+      Number.parseInt(req.query.page, 10) || 1,
+    );
 
-    const pageNumber = Math.max(1, Number(page) || 1);
-    const pageSize = Math.min(100, Math.max(1, Number(limit) || 20));
+    const pageSize = Math.min(
+      100,
+      Math.max(1, Number.parseInt(req.query.limit, 10) || 20),
+    );
 
     const filter = {
       assignedEmployee: employeeId,
     };
 
     const allowedStatuses = [
+      "unassigned",
       "assigned",
-      "received",
+      "picked_up",
+      "in_transit",
       "delivered",
-      "rejected",
+      "failed",
+      "returned",
       "cancelled",
     ];
 
-    if (status && allowedStatuses.includes(status)) {
-      filter.deliveryStatus = status;
+    if (
+      req.query.status &&
+      allowedStatuses.includes(req.query.status)
+    ) {
+      filter.deliveryStatus = req.query.status;
     }
 
     const [orders, total] = await Promise.all([
-      Order.find(filter)
+      MainOrder.find(filter)
         .populate("customer", "name phone email")
         .populate("assignedEmployee", "name phone email")
         .populate("assignedBy", "name email")
@@ -210,7 +274,7 @@ export const getMyOrders = async (req, res) => {
         .limit(pageSize)
         .lean(),
 
-      Order.countDocuments(filter),
+      MainOrder.countDocuments(filter),
     ]);
 
     return res.status(200).json({
@@ -229,19 +293,22 @@ export const getMyOrders = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to load assigned orders",
+      error: error.message,
     });
   }
 };
 
-/* ================= UPDATE DELIVERY STATUS ================= */
+/* =====================================================
+   UPDATE EMPLOYEE DELIVERY STATUS
+===================================================== */
 
 export const updateEmployeeOrderStatus = async (req, res) => {
   try {
-    const employeeId = getEmployeeId(req);
+    const employeeId = getUserId(req);
     const { orderId } = req.params;
     const { status, note = "" } = req.body || {};
 
-    if (!employeeId || !isValidId(employeeId)) {
+    if (!isValidId(employeeId)) {
       return res.status(400).json({
         success: false,
         message: "Valid employee ID is missing",
@@ -255,11 +322,14 @@ export const updateEmployeeOrderStatus = async (req, res) => {
       });
     }
 
+    // Must match the deliveryStatus enum in MainOrder schema.
     const transitions = {
-      received: ["assigned"],
-      delivered: ["received"],
-      rejected: ["assigned"],
-      cancelled: ["assigned", "received"],
+      picked_up: ["assigned"],
+      in_transit: ["picked_up"],
+      delivered: ["in_transit", "picked_up"],
+      failed: ["assigned", "picked_up", "in_transit"],
+      returned: ["failed", "in_transit"],
+      cancelled: ["assigned"],
     };
 
     if (!transitions[status]) {
@@ -269,7 +339,7 @@ export const updateEmployeeOrderStatus = async (req, res) => {
       });
     }
 
-    const order = await Order.findOne({
+    const order = await MainOrder.findOne({
       _id: orderId,
       assignedEmployee: employeeId,
     });
@@ -281,7 +351,7 @@ export const updateEmployeeOrderStatus = async (req, res) => {
       });
     }
 
-    const currentStatus = order.deliveryStatus || "assigned";
+    const currentStatus = order.deliveryStatus || "unassigned";
 
     if (!transitions[status].includes(currentStatus)) {
       return res.status(409).json({
@@ -291,82 +361,59 @@ export const updateEmployeeOrderStatus = async (req, res) => {
     }
 
     const cleanNote = normalizeText(note);
+    const actorId = getValidActorId(req);
 
-    const updateFields = {
-      deliveryStatus: status,
-      deliveryNote: cleanNote,
-    };
+    order.deliveryStatus = status;
+    order.deliveryNote = cleanNote;
 
-    if (status === "delivered" || status === "cancelled") {
-      updateFields.status = status;
+    if (status === "delivered") {
+      order.status = "delivered";
+    } else if (status === "cancelled") {
+      order.status = "cancelled";
+    } else if (status === "returned") {
+      order.status = "returned";
     }
 
-    const statusCondition =
-      order.deliveryStatus == null
-        ? {
-            $or: [
-              { deliveryStatus: { $exists: false } },
-              { deliveryStatus: null },
-              { deliveryStatus: "" },
-            ],
-          }
-        : { deliveryStatus: order.deliveryStatus };
+    addDeliveryHistory(order, status, cleanNote, actorId);
 
-    const updatedOrder = await Order.findOneAndUpdate(
-      {
-        _id: orderId,
-        assignedEmployee: employeeId,
-        ...statusCondition,
-      },
-      {
-        $set: updateFields,
-        $push: {
-          deliveryHistory: {
-            action: status,
-            employee: employeeId,
-            changedBy: isValidId(employeeId) ? employeeId : null,
-            note: cleanNote,
-            changedAt: new Date(),
-          },
-        },
-      },
-      {
-        new: true,
-        runValidators: true,
-      },
-    );
-
-    if (!updatedOrder) {
-      return res.status(409).json({
-        success: false,
-        message: "Order status changed. Refresh and retry.",
-      });
-    }
-
-    await populateOrder(updatedOrder);
+    await order.save();
+    await populateOrder(order);
 
     return res.status(200).json({
       success: true,
       message: `Order marked as ${status}`,
-      data: updatedOrder,
+      data: order,
     });
   } catch (error) {
     console.error("updateEmployeeOrderStatus error:", error);
 
+    if (error.name === "ValidationError") {
+      return res.status(400).json({
+        success: false,
+        message: "Order validation failed",
+        error: error.message,
+      });
+    }
+
     return res.status(500).json({
       success: false,
       message: "Failed to update order status",
+      error: error.message,
     });
   }
 };
 
-/* ================= EMPLOYEE STATISTICS ================= */
+/* =====================================================
+   EMPLOYEE STATISTICS
+===================================================== */
 
 const getEmployeeStats = async (employeeId) => {
-  const employeeObjectId = new mongoose.Types.ObjectId(employeeId);
+  const employeeObjectId = new mongoose.Types.ObjectId(
+    String(employeeId),
+  );
 
-  const [current, historical] = await Promise.all([
-    Order.aggregate([
+  const [current, assignmentHistory] = await Promise.all([
+    MainOrder.aggregate([
       {
         $match: {
           assignedEmployee: employeeObjectId,
@@ -374,20 +421,20 @@ const getEmployeeStats = async (employeeId) => {
       },
       {
         $group: {
-          _id: { $ifNull: ["$deliveryStatus", "unassigned"] },
+          _id: {
+            $ifNull: ["$deliveryStatus", "unassigned"],
+          },
           count: { $sum: 1 },
         },
       },
     ]),
 
-    Order.aggregate([
+    MainOrder.aggregate([
       { $unwind: "$deliveryHistory" },
       {
         $match: {
-          "deliveryHistory.employee": employeeObjectId,
-          "deliveryHistory.action": {
-            $in: ["assigned", "reassigned"],
-          },
+          "deliveryHistory.status": "assigned",
+          "deliveryHistory.updatedBy": employeeObjectId,
         },
       },
       { $group: { _id: "$_id" } },
@@ -400,20 +447,26 @@ const getEmployeeStats = async (employeeId) => {
   );
 
   const assigned = counts.assigned || 0;
-  const received = counts.received || 0;
+  const pickedUp = counts.picked_up || 0;
+  const inTransit = counts.in_transit || 0;
 
   return {
-    totalAssigned: historical[0]?.total || 0,
-    currentlyAssigned: assigned + received,
-    received,
+    totalAssigned: assignmentHistory[0]?.total || 0,
+    currentlyAssigned: assigned + pickedUp + inTransit,
+    assigned,
+    pickedUp,
+    inTransit,
     delivered: counts.delivered || 0,
-    rejected: counts.rejected || 0,
+    failed: counts.failed || 0,
+    returned: counts.returned || 0,
     cancelled: counts.cancelled || 0,
-    pending: assigned + received,
+    pending: assigned + pickedUp + inTransit,
   };
 };
 
-/* ================= ALL EMPLOYEE REPORTS ================= */
+/* =====================================================
+   ALL EMPLOYEE REPORTS
+===================================================== */
 
 export const getEmployeeReportSummary = async (req, res) => {
   try {
@@ -442,11 +495,14 @@ export const getEmployeeReportSummary = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to load employee report",
+      error: error.message,
     });
   }
 };
 
-/* ================= SINGLE EMPLOYEE REPORT ================= */
+/* =====================================================
+   SINGLE EMPLOYEE REPORT
+===================================================== */
 
 export const getEmployeeReportById = async (req, res) => {
   try {
@@ -477,7 +533,10 @@ export const getEmployeeReportById = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      data: { ...employee, stats },
+      data: {
+        ...employee,
+        stats,
+      },
     });
   } catch (error) {
     console.error("getEmployeeReportById error:", error);
@@ -485,11 +544,14 @@ export const getEmployeeReportById = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to load employee report",
+      error: error.message,
     });
   }
 };
 
-/* ================= ACTIVE EMPLOYEES ================= */
+/* =====================================================
+   ACTIVE EMPLOYEES
+===================================================== */
 
 export const getEmployees = async (req, res) => {
   try {
@@ -512,6 +574,7 @@ export const getEmployees = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to load employees",
+      error: error.message,
     });
   }
 };

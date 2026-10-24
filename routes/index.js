@@ -35,6 +35,7 @@ import { deleteCustomer, getAllCustomers, getCustomerById, getMyProfile, login, 
 import { verifyToken } from "../Middleware/authMiddleware.js";
 import { authorizeRoles } from "../Middleware/roleMiddleware.js";
 import { createLandingPage, deleteLandingPage, getLandingPageById, getLandingPages, getPublishedLandingPage, getPublishedLandingPageBanners, getPublishedOffers, setLandingPageStatus, updateLandingPage } from "../Controller/LandingPageController.js";
+import { assignOrder, getEmployeeReportById, getEmployeeReportSummary, getMyOrders, reassignOrder, updateEmployeeOrderStatus } from "../Controller/EmployeeController.js";
 const router = express.Router();
 
 router.post(
@@ -163,7 +164,13 @@ router.patch(
 );
 
 router.delete("/deleteLandingPage/:id",  deleteLandingPage);
-
+// employeeMange route
+router.post("/assignOrder",  assignOrder);
+router.patch("/reassignOrder/:orderId", reassignOrder);
+router.get("/my-orders",  getMyOrders);
+router.patch("/:orderId/status",updateEmployeeOrderStatus);
+router.get("/summary",  getEmployeeReportSummary);
+router.get("getEmployeeReportById/:employeeId", getEmployeeReportById);
 
 
 

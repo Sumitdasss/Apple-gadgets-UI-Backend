@@ -8,7 +8,11 @@ import Customer from "../Model/Customer.js";
 import { apiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { sendOtpEmail } from "../Service/SendOtpHandler.js";
-
+import {
+  getCustomerCache,
+  setCustomerCache,
+  clearCustomerCache,
+} from "../utils/customerCache.js";
 const OTP_EXPIRY_MS = 5 * 60 * 1000;
 const MAX_LOGIN_OTP_ATTEMPTS = 5;
 
@@ -468,6 +472,7 @@ export const getMyProfile = asyncHandler(async (req, res) => {
 // GET /api/customers/AllCustomers
 // =====================================================
 
+
 export const getAllCustomers = async (req, res) => {
   try {
     const page = Math.max(
@@ -482,6 +487,20 @@ export const getAllCustomers = async (req, res) => {
 
     const search = String(req.query.search || "").trim();
     const status = String(req.query.status || "all");
+
+    const cacheKey = JSON.stringify({
+      page,
+      limit,
+      search,
+      status,
+    });
+
+    const cached = await getCustomerCache(cacheKey);
+
+    if (cached !== null) {
+      res.set("X-Cache", "HIT");
+      return res.status(200).json(cached);
+    }
 
     const filter = {};
 
@@ -519,7 +538,7 @@ export const getAllCustomers = async (req, res) => {
       Customer.countDocuments(filter),
     ]);
 
-    return res.status(200).json({
+    const response = {
       success: true,
       message: "Customers fetched successfully",
       data: {
@@ -531,7 +550,12 @@ export const getAllCustomers = async (req, res) => {
           totalPages: Math.ceil(total / limit),
         },
       },
-    });
+    };
+
+    await setCustomerCache(cacheKey, response);
+
+    res.set("X-Cache", "MISS");
+    return res.status(200).json(response);
   } catch (error) {
     console.error("Get customers error:", error);
 
@@ -541,6 +565,7 @@ export const getAllCustomers = async (req, res) => {
     });
   }
 };
+
 
 // =====================================================
 // GET CUSTOMER BY ID
@@ -631,7 +656,8 @@ export const updateCustomerStatus = async (req, res) => {
 
     customer.isActive = isActive;
 
-    await customer.save();
+await customer.save();
+await clearCustomerCache();
 
     return res.status(200).json({
       success: true,
@@ -687,6 +713,7 @@ export const deleteCustomer = async (req, res) => {
     }
 
     await Customer.deleteOne({ _id: customer._id });
+await clearCustomerCache();
 
     return res.status(200).json({
       success: true,
@@ -752,7 +779,8 @@ export const updateCustomerRole = async (req, res) => {
     }
 
     customer.role = role;
-    await customer.save();
+await customer.save();
+await clearCustomerCache();
 
     return res.status(200).json({
       success: true,

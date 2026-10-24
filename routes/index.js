@@ -167,7 +167,7 @@ router.delete("/deleteLandingPage/:id",  deleteLandingPage);
 // employeeMange route
 router.post("/assignOrder",  assignOrder);
 router.patch("/reassignOrder/:orderId", reassignOrder);
-router.get("/my-orders",
+router.get("/my-orders",verifyToken,
   authorizeRoles("employee"),  getMyOrders);
 router.patch("/:orderId/status",updateEmployeeOrderStatus);
 router.get("/summary",  getEmployeeReportSummary);

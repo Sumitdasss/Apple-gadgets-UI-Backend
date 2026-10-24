@@ -167,9 +167,20 @@ router.delete("/deleteLandingPage/:id",  deleteLandingPage);
 // employeeMange route
 router.post("/assignOrder",  assignOrder);
 router.patch("/reassignOrder/:orderId", reassignOrder);
-router.get("/my-orders",verifyToken,
-  authorizeRoles("employee"),  getMyOrders);
-router.patch("/:orderId/status",updateEmployeeOrderStatus);
+router.get(
+  "/my-orders",
+  verifyToken,
+  authorizeRoles("employee"),
+  getMyOrders
+);
+
+router.patch(
+  "/:orderId/status",
+  verifyToken,
+  authorizeRoles("employee"),
+  updateEmployeeOrderStatus
+);
+
 router.get("/summary",  getEmployeeReportSummary);
 router.get("/getEmployees",  getEmployees);
 router.get("getEmployeeReportById/:employeeId", getEmployeeReportById);

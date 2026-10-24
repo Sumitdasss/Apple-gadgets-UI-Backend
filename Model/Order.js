@@ -131,11 +131,11 @@ const orderSchema = new mongoose.Schema(
           default: null,
         },
 
-        changedBy: {
-          type: mongoose.Schema.Types.ObjectId,
-          ref: "Customer",
-          required: true,
-        },
+      changedBy: {
+  type: mongoose.Schema.Types.ObjectId,
+  ref: "Customer",
+  default: null,
+},
 
         note: {
           type: String,

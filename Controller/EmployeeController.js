@@ -3,9 +3,7 @@ import mongoose from "mongoose";
 import Order from "../Model/Order.js";
 import Customer from "../Model/Customer.js";
 
-/* =========================================================
-   HELPERS
-========================================================= */
+/* ================= HELPERS ================= */
 
 const getUserId = (req) => req.user?._id || req.user?.id || null;
 
@@ -15,6 +13,11 @@ const isValidId = (id) => mongoose.isValidObjectId(id);
 
 const normalizeText = (value, maxLength = 500) =>
   String(value ?? "").trim().slice(0, maxLength);
+
+const getValidActorId = (req) => {
+  const id = getUserId(req);
+  return id && isValidId(id) ? id : null;
+};
 
 const populateOrder = async (order) => {
   await order.populate([
@@ -26,17 +29,7 @@ const populateOrder = async (order) => {
   return order;
 };
 
-/* =========================================================
-   ASSIGN ORDER TO EMPLOYEE
-   POST /api/dashboard/assignOrder
-
-   Body:
-   {
-     "orderId": "MongoDB _id OR custom orderId",
-     "employeeId": "employee MongoDB _id",
-     "note": "Optional note"
-   }
-========================================================= */
+/* ================= ASSIGN ORDER ================= */
 
 export const assignOrder = async (req, res) => {
   try {
@@ -49,8 +42,6 @@ export const assignOrder = async (req, res) => {
       });
     }
 
-    const actorId = getUserId(req);
-
     if (!isValidId(employeeId)) {
       return res.status(400).json({
         success: false,
@@ -58,15 +49,6 @@ export const assignOrder = async (req, res) => {
       });
     }
 
-    // deliveryHistory.changedBy is required in the schema.
-    if (!actorId || !isValidId(actorId)) {
-      return res.status(401).json({
-        success: false,
-        message: "Authenticated user ID is missing or invalid",
-      });
-    }
-
-    // Find an active employee.
     const employee = await Customer.findOne({
       _id: employeeId,
       role: "employee",
@@ -80,7 +62,7 @@ export const assignOrder = async (req, res) => {
       });
     }
 
-    // Find using MongoDB _id first, then the custom orderId.
+    // Find order by MongoDB _id or custom orderId.
     const receivedOrderId = String(orderId).trim();
 
     let order = null;
@@ -96,7 +78,7 @@ export const assignOrder = async (req, res) => {
     }
 
     if (!order) {
-      console.error("Order not found during assignment:", {
+      console.error("Order not found:", {
         receivedOrderId,
         collection: Order.collection.name,
         database: Order.db.name,
@@ -105,15 +87,9 @@ export const assignOrder = async (req, res) => {
       return res.status(404).json({
         success: false,
         message: "Order not found",
-        details: {
-          searchedId: receivedOrderId,
-          collection: Order.collection.name,
-          database: Order.db.name,
-        },
       });
     }
 
-    // Prevent assigning completed or cancelled orders.
     if (
       ["delivered", "cancelled"].includes(order.status) ||
       ["delivered", "cancelled"].includes(order.deliveryStatus)
@@ -124,15 +100,15 @@ export const assignOrder = async (req, res) => {
       });
     }
 
+    const actorId = getValidActorId(req);
+
     const previousEmployeeId = order.assignedEmployee
       ? String(order.assignedEmployee)
       : null;
 
-    const newEmployeeId = String(employee._id);
-
     const isReassignment =
       Boolean(previousEmployeeId) &&
-      previousEmployeeId !== newEmployeeId;
+      previousEmployeeId !== String(employee._id);
 
     const now = new Date();
 
@@ -142,7 +118,6 @@ export const assignOrder = async (req, res) => {
     order.deliveryStatus = "assigned";
     order.deliveryNote = "";
 
-    // Record every assignment in the audit history.
     order.deliveryHistory.push({
       action: isReassignment ? "reassigned" : "assigned",
       employee: employee._id,
@@ -179,16 +154,7 @@ export const assignOrder = async (req, res) => {
   }
 };
 
-/* =========================================================
-   REASSIGN ORDER
-   PATCH /api/dashboard/reassignOrder/:orderId
-
-   Body:
-   {
-     "employeeId": "...",
-     "note": "Optional note"
-   }
-========================================================= */
+/* ================= REASSIGN ORDER ================= */
 
 export const reassignOrder = async (req, res) => {
   req.body = {
@@ -199,33 +165,21 @@ export const reassignOrder = async (req, res) => {
   return assignOrder(req, res);
 };
 
-/* =========================================================
-   GET EMPLOYEE'S ASSIGNED ORDERS
-========================================================= */
+/* ================= EMPLOYEE ORDERS ================= */
 
 export const getMyOrders = async (req, res) => {
   try {
-    if (req.user?.role !== "employee") {
-      return res.status(403).json({
-        success: false,
-        message: "Employee access required",
-      });
-    }
-
+    // This endpoint still needs to identify which employee owns the orders.
     const employeeId = getEmployeeId(req);
 
     if (!employeeId || !isValidId(employeeId)) {
-      return res.status(401).json({
+      return res.status(400).json({
         success: false,
         message: "Valid employee ID is missing",
       });
     }
 
-    const {
-      page = 1,
-      limit = 20,
-      status,
-    } = req.query;
+    const { page = 1, limit = 20, status } = req.query;
 
     const pageNumber = Math.max(1, Number(page) || 1);
     const pageSize = Math.min(100, Math.max(1, Number(limit) || 20));
@@ -279,32 +233,16 @@ export const getMyOrders = async (req, res) => {
   }
 };
 
-/* =========================================================
-   EMPLOYEE UPDATES DELIVERY STATUS
-   PATCH /api/dashboard/myOrders/:orderId/status
-
-   Body:
-   {
-     "status": "received" | "delivered" | "rejected" | "cancelled",
-     "note": "Optional note"
-   }
-========================================================= */
+/* ================= UPDATE DELIVERY STATUS ================= */
 
 export const updateEmployeeOrderStatus = async (req, res) => {
   try {
-    if (req.user?.role !== "employee") {
-      return res.status(403).json({
-        success: false,
-        message: "Employee access required",
-      });
-    }
-
     const employeeId = getEmployeeId(req);
     const { orderId } = req.params;
     const { status, note = "" } = req.body || {};
 
     if (!employeeId || !isValidId(employeeId)) {
-      return res.status(401).json({
+      return res.status(400).json({
         success: false,
         message: "Valid employee ID is missing",
       });
@@ -313,7 +251,7 @@ export const updateEmployeeOrderStatus = async (req, res) => {
     if (!isValidId(orderId)) {
       return res.status(400).json({
         success: false,
-        message: "Invalid order ID. Use the MongoDB document _id.",
+        message: "Invalid order ID",
       });
     }
 
@@ -331,7 +269,6 @@ export const updateEmployeeOrderStatus = async (req, res) => {
       });
     }
 
-    // Only the employee assigned to this order may update it.
     const order = await Order.findOne({
       _id: orderId,
       assignedEmployee: employeeId,
@@ -353,8 +290,6 @@ export const updateEmployeeOrderStatus = async (req, res) => {
       });
     }
 
-    const actorId = employeeId;
-    const now = new Date();
     const cleanNote = normalizeText(note);
 
     const updateFields = {
@@ -362,12 +297,10 @@ export const updateEmployeeOrderStatus = async (req, res) => {
       deliveryNote: cleanNote,
     };
 
-    // Keep the existing order status consistent with delivery status.
     if (status === "delivered" || status === "cancelled") {
       updateFields.status = status;
     }
 
-    // Conditional update prevents overwriting a simultaneous status change.
     const statusCondition =
       order.deliveryStatus == null
         ? {
@@ -391,9 +324,9 @@ export const updateEmployeeOrderStatus = async (req, res) => {
           deliveryHistory: {
             action: status,
             employee: employeeId,
-            changedBy: actorId,
+            changedBy: isValidId(employeeId) ? employeeId : null,
             note: cleanNote,
-            changedAt: now,
+            changedAt: new Date(),
           },
         },
       },
@@ -406,7 +339,7 @@ export const updateEmployeeOrderStatus = async (req, res) => {
     if (!updatedOrder) {
       return res.status(409).json({
         success: false,
-        message: "Order status changed concurrently. Refresh and retry.",
+        message: "Order status changed. Refresh and retry.",
       });
     }
 
@@ -420,14 +353,6 @@ export const updateEmployeeOrderStatus = async (req, res) => {
   } catch (error) {
     console.error("updateEmployeeOrderStatus error:", error);
 
-    if (error.name === "ValidationError") {
-      return res.status(400).json({
-        success: false,
-        message: "Order validation failed",
-        error: error.message,
-      });
-    }
-
     return res.status(500).json({
       success: false,
       message: "Failed to update order status",
@@ -435,15 +360,12 @@ export const updateEmployeeOrderStatus = async (req, res) => {
   }
 };
 
-/* =========================================================
-   EMPLOYEE REPORT STATISTICS
-========================================================= */
+/* ================= EMPLOYEE STATISTICS ================= */
 
 const getEmployeeStats = async (employeeId) => {
   const employeeObjectId = new mongoose.Types.ObjectId(employeeId);
 
   const [current, historical] = await Promise.all([
-    // Current order totals.
     Order.aggregate([
       {
         $match: {
@@ -452,15 +374,12 @@ const getEmployeeStats = async (employeeId) => {
       },
       {
         $group: {
-          _id: {
-            $ifNull: ["$deliveryStatus", "unassigned"],
-          },
+          _id: { $ifNull: ["$deliveryStatus", "unassigned"] },
           count: { $sum: 1 },
         },
       },
     ]),
 
-    // Unique orders ever assigned/reassigned to this employee.
     Order.aggregate([
       { $unwind: "$deliveryHistory" },
       {
@@ -471,14 +390,8 @@ const getEmployeeStats = async (employeeId) => {
           },
         },
       },
-      {
-        $group: {
-          _id: "$_id",
-        },
-      },
-      {
-        $count: "total",
-      },
+      { $group: { _id: "$_id" } },
+      { $count: "total" },
     ]),
   ]);
 
@@ -500,9 +413,7 @@ const getEmployeeStats = async (employeeId) => {
   };
 };
 
-/* =========================================================
-   ALL EMPLOYEE REPORTS
-========================================================= */
+/* ================= ALL EMPLOYEE REPORTS ================= */
 
 export const getEmployeeReportSummary = async (req, res) => {
   try {
@@ -535,9 +446,7 @@ export const getEmployeeReportSummary = async (req, res) => {
   }
 };
 
-/* =========================================================
-   SINGLE EMPLOYEE REPORT
-========================================================= */
+/* ================= SINGLE EMPLOYEE REPORT ================= */
 
 export const getEmployeeReportById = async (req, res) => {
   try {
@@ -568,10 +477,7 @@ export const getEmployeeReportById = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      data: {
-        ...employee,
-        stats,
-      },
+      data: { ...employee, stats },
     });
   } catch (error) {
     console.error("getEmployeeReportById error:", error);
@@ -583,9 +489,7 @@ export const getEmployeeReportById = async (req, res) => {
   }
 };
 
-/* =========================================================
-   GET ACTIVE EMPLOYEES FOR ASSIGNMENT
-========================================================= */
+/* ================= ACTIVE EMPLOYEES ================= */
 
 export const getEmployees = async (req, res) => {
   try {

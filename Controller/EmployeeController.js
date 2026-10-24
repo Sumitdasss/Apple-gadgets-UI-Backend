@@ -1,10 +1,46 @@
+
 import mongoose from "mongoose";
 import Order from "../Model/Order.js";
 import Customer from "../Model/Customer.js";
 
+/* =========================================================
+   HELPERS
+========================================================= */
+
+const getUserId = (req) => req.user?._id || req.user?.id || null;
+
+const getEmployeeId = (req) => getUserId(req);
+
+const isValidId = (id) => mongoose.isValidObjectId(id);
+
+const normalizeText = (value, maxLength = 500) =>
+  String(value ?? "").trim().slice(0, maxLength);
+
+const populateOrder = async (order) => {
+  await order.populate([
+    { path: "customer", select: "name phone email" },
+    { path: "assignedEmployee", select: "name email phone role" },
+    { path: "assignedBy", select: "name email role" },
+  ]);
+
+  return order;
+};
+
+/* =========================================================
+   ASSIGN ORDER TO EMPLOYEE
+   POST /api/dashboard/assignOrder
+
+   Body:
+   {
+     "orderId": "MongoDB _id OR custom orderId",
+     "employeeId": "employee MongoDB _id",
+     "note": "Optional note"
+   }
+========================================================= */
+
 export const assignOrder = async (req, res) => {
   try {
-    const { orderId, employeeId, note = "" } = req.body;
+    const { orderId, employeeId, note = "" } = req.body || {};
 
     if (!orderId || !employeeId) {
       return res.status(400).json({
@@ -13,77 +49,110 @@ export const assignOrder = async (req, res) => {
       });
     }
 
-    if (!mongoose.isValidObjectId(employeeId)) {
+    const actorId = getUserId(req);
+
+    if (!isValidId(employeeId)) {
       return res.status(400).json({
         success: false,
         message: "Invalid employeeId",
       });
     }
 
-    const employee = await Customer.findById(employeeId).select(
-      "_id name email phone role isActive",
-    );
+    // deliveryHistory.changedBy is required in the schema.
+    if (!actorId || !isValidId(actorId)) {
+      return res.status(401).json({
+        success: false,
+        message: "Authenticated user ID is missing or invalid",
+      });
+    }
 
-    if (
-      !employee ||
-      employee.role !== "employee" ||
-      employee.isActive === false
-    ) {
-      return res.status(400).json({
+    // Find an active employee.
+    const employee = await Customer.findOne({
+      _id: employeeId,
+      role: "employee",
+      isActive: { $ne: false },
+    }).select("_id name email phone role isActive");
+
+    if (!employee) {
+      return res.status(404).json({
         success: false,
         message: "Active employee not found",
       });
     }
 
-    // ✅ _id অথবা custom orderId দুটো দিয়েই খুঁজবে
+    // Find using MongoDB _id first, then the custom orderId.
+    const receivedOrderId = String(orderId).trim();
+
     let order = null;
 
-    if (mongoose.isValidObjectId(orderId)) {
-      order = await Order.findById(orderId);
+    if (isValidId(receivedOrderId)) {
+      order = await Order.findById(receivedOrderId);
     }
 
     if (!order) {
-      order = await Order.findOne({ orderId: orderId });
-    }
-
-    if (!order) {
-      return res.status(404).json({
-        success: false,
-        message: "Order not found",
+      order = await Order.findOne({
+        orderId: receivedOrderId,
       });
     }
 
-    if (["delivered", "cancelled"].includes(order.status)) {
+    if (!order) {
+      console.error("Order not found during assignment:", {
+        receivedOrderId,
+        collection: Order.collection.name,
+        database: Order.db.name,
+      });
+
+      return res.status(404).json({
+        success: false,
+        message: "Order not found",
+        details: {
+          searchedId: receivedOrderId,
+          collection: Order.collection.name,
+          database: Order.db.name,
+        },
+      });
+    }
+
+    // Prevent assigning completed or cancelled orders.
+    if (
+      ["delivered", "cancelled"].includes(order.status) ||
+      ["delivered", "cancelled"].includes(order.deliveryStatus)
+    ) {
       return res.status(409).json({
         success: false,
         message: "Completed or cancelled orders cannot be assigned",
       });
     }
 
-    const previousEmployee = order.assignedEmployee;
+    const previousEmployeeId = order.assignedEmployee
+      ? String(order.assignedEmployee)
+      : null;
+
+    const newEmployeeId = String(employee._id);
+
     const isReassignment =
-      previousEmployee && previousEmployee.toString() !== employeeId;
+      Boolean(previousEmployeeId) &&
+      previousEmployeeId !== newEmployeeId;
+
+    const now = new Date();
 
     order.assignedEmployee = employee._id;
-    order.assignedBy = req.user?._id || null;
-    order.assignedAt = new Date();
+    order.assignedBy = actorId;
+    order.assignedAt = now;
     order.deliveryStatus = "assigned";
     order.deliveryNote = "";
 
+    // Record every assignment in the audit history.
     order.deliveryHistory.push({
       action: isReassignment ? "reassigned" : "assigned",
       employee: employee._id,
-      changedBy: req.user?._id || null,
-      note: String(note).slice(0, 500),
-      changedAt: new Date(),
+      changedBy: actorId,
+      note: normalizeText(note),
+      changedAt: now,
     });
 
     await order.save();
-
-    await order.populate([
-      { path: "assignedEmployee", select: "name email phone role" },
-      { path: "assignedBy", select: "name email role" },
-    ]);
+    await populateOrder(order);
 
     return res.status(200).json({
       success: true,
@@ -93,7 +162,15 @@ export const assignOrder = async (req, res) => {
       data: order,
     });
   } catch (error) {
-    console.error("assignOrder:", error);
+    console.error("assignOrder error:", error);
+
+    if (error.name === "ValidationError") {
+      return res.status(400).json({
+        success: false,
+        message: "Order validation failed",
+        error: error.message,
+      });
+    }
 
     return res.status(500).json({
       success: false,
@@ -101,12 +178,30 @@ export const assignOrder = async (req, res) => {
     });
   }
 };
+
+/* =========================================================
+   REASSIGN ORDER
+   PATCH /api/dashboard/reassignOrder/:orderId
+
+   Body:
+   {
+     "employeeId": "...",
+     "note": "Optional note"
+   }
+========================================================= */
+
 export const reassignOrder = async (req, res) => {
-  req.body.orderId = req.params.orderId;
+  req.body = {
+    ...(req.body || {}),
+    orderId: req.params.orderId,
+  };
+
   return assignOrder(req, res);
 };
 
-const getEmployeeId = (req) => req.user?._id || req.user?.id;
+/* =========================================================
+   GET EMPLOYEE'S ASSIGNED ORDERS
+========================================================= */
 
 export const getMyOrders = async (req, res) => {
   try {
@@ -117,28 +212,45 @@ export const getMyOrders = async (req, res) => {
       });
     }
 
-    const { page = 1, limit = 20, status } = req.query;
+    const employeeId = getEmployeeId(req);
+
+    if (!employeeId || !isValidId(employeeId)) {
+      return res.status(401).json({
+        success: false,
+        message: "Valid employee ID is missing",
+      });
+    }
+
+    const {
+      page = 1,
+      limit = 20,
+      status,
+    } = req.query;
 
     const pageNumber = Math.max(1, Number(page) || 1);
     const pageSize = Math.min(100, Math.max(1, Number(limit) || 20));
 
     const filter = {
-      assignedEmployee: getEmployeeId(req),
+      assignedEmployee: employeeId,
     };
 
-    if (
-      status &&
-      ["assigned", "received", "delivered", "rejected", "cancelled"].includes(
-        status,
-      )
-    ) {
+    const allowedStatuses = [
+      "assigned",
+      "received",
+      "delivered",
+      "rejected",
+      "cancelled",
+    ];
+
+    if (status && allowedStatuses.includes(status)) {
       filter.deliveryStatus = status;
     }
 
     const [orders, total] = await Promise.all([
       Order.find(filter)
         .populate("customer", "name phone email")
-        .populate("assignedEmployee", "name phone")
+        .populate("assignedEmployee", "name phone email")
+        .populate("assignedBy", "name email")
         .sort({ assignedAt: -1, createdAt: -1 })
         .skip((pageNumber - 1) * pageSize)
         .limit(pageSize)
@@ -158,7 +270,7 @@ export const getMyOrders = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("getMyOrders:", error);
+    console.error("getMyOrders error:", error);
 
     return res.status(500).json({
       success: false,
@@ -166,6 +278,17 @@ export const getMyOrders = async (req, res) => {
     });
   }
 };
+
+/* =========================================================
+   EMPLOYEE UPDATES DELIVERY STATUS
+   PATCH /api/dashboard/myOrders/:orderId/status
+
+   Body:
+   {
+     "status": "received" | "delivered" | "rejected" | "cancelled",
+     "note": "Optional note"
+   }
+========================================================= */
 
 export const updateEmployeeOrderStatus = async (req, res) => {
   try {
@@ -178,12 +301,19 @@ export const updateEmployeeOrderStatus = async (req, res) => {
 
     const employeeId = getEmployeeId(req);
     const { orderId } = req.params;
-    const { status, note = "" } = req.body;
+    const { status, note = "" } = req.body || {};
 
-    if (!mongoose.isValidObjectId(orderId)) {
+    if (!employeeId || !isValidId(employeeId)) {
+      return res.status(401).json({
+        success: false,
+        message: "Valid employee ID is missing",
+      });
+    }
+
+    if (!isValidId(orderId)) {
       return res.status(400).json({
         success: false,
-        message: "Invalid order ID",
+        message: "Invalid order ID. Use the MongoDB document _id.",
       });
     }
 
@@ -201,6 +331,7 @@ export const updateEmployeeOrderStatus = async (req, res) => {
       });
     }
 
+    // Only the employee assigned to this order may update it.
     const order = await Order.findOne({
       _id: orderId,
       assignedEmployee: employeeId,
@@ -222,34 +353,47 @@ export const updateEmployeeOrderStatus = async (req, res) => {
       });
     }
 
-    const update = {
+    const actorId = employeeId;
+    const now = new Date();
+    const cleanNote = normalizeText(note);
+
+    const updateFields = {
       deliveryStatus: status,
-      deliveryNote: String(note).slice(0, 500),
+      deliveryNote: cleanNote,
     };
 
-    if (status === "delivered") {
-      update.status = "delivered";
+    // Keep the existing order status consistent with delivery status.
+    if (status === "delivered" || status === "cancelled") {
+      updateFields.status = status;
     }
 
-    if (status === "cancelled") {
-      update.status = "cancelled";
-    }
+    // Conditional update prevents overwriting a simultaneous status change.
+    const statusCondition =
+      order.deliveryStatus == null
+        ? {
+            $or: [
+              { deliveryStatus: { $exists: false } },
+              { deliveryStatus: null },
+              { deliveryStatus: "" },
+            ],
+          }
+        : { deliveryStatus: order.deliveryStatus };
 
     const updatedOrder = await Order.findOneAndUpdate(
       {
         _id: orderId,
         assignedEmployee: employeeId,
-        deliveryStatus: currentStatus,
+        ...statusCondition,
       },
       {
-        $set: update,
+        $set: updateFields,
         $push: {
           deliveryHistory: {
             action: status,
             employee: employeeId,
-            changedBy: employeeId,
-            note: String(note).slice(0, 500),
-            changedAt: new Date(),
+            changedBy: actorId,
+            note: cleanNote,
+            changedAt: now,
           },
         },
       },
@@ -257,16 +401,16 @@ export const updateEmployeeOrderStatus = async (req, res) => {
         new: true,
         runValidators: true,
       },
-    )
-      .populate("customer", "name phone email")
-      .populate("assignedEmployee", "name phone");
+    );
 
     if (!updatedOrder) {
       return res.status(409).json({
         success: false,
-        message: "Order changed concurrently. Refresh and retry.",
+        message: "Order status changed concurrently. Refresh and retry.",
       });
     }
+
+    await populateOrder(updatedOrder);
 
     return res.status(200).json({
       success: true,
@@ -274,7 +418,15 @@ export const updateEmployeeOrderStatus = async (req, res) => {
       data: updatedOrder,
     });
   } catch (error) {
-    console.error("updateEmployeeOrderStatus:", error);
+    console.error("updateEmployeeOrderStatus error:", error);
+
+    if (error.name === "ValidationError") {
+      return res.status(400).json({
+        success: false,
+        message: "Order validation failed",
+        error: error.message,
+      });
+    }
 
     return res.status(500).json({
       success: false,
@@ -283,30 +435,45 @@ export const updateEmployeeOrderStatus = async (req, res) => {
   }
 };
 
+/* =========================================================
+   EMPLOYEE REPORT STATISTICS
+========================================================= */
+
 const getEmployeeStats = async (employeeId) => {
+  const employeeObjectId = new mongoose.Types.ObjectId(employeeId);
+
   const [current, historical] = await Promise.all([
+    // Current order totals.
     Order.aggregate([
       {
         $match: {
-          assignedEmployee: new mongoose.Types.ObjectId(employeeId),
+          assignedEmployee: employeeObjectId,
         },
       },
       {
         $group: {
-          _id: "$deliveryStatus",
+          _id: {
+            $ifNull: ["$deliveryStatus", "unassigned"],
+          },
           count: { $sum: 1 },
         },
       },
     ]),
 
+    // Unique orders ever assigned/reassigned to this employee.
     Order.aggregate([
       { $unwind: "$deliveryHistory" },
       {
         $match: {
-          "deliveryHistory.employee": new mongoose.Types.ObjectId(employeeId),
+          "deliveryHistory.employee": employeeObjectId,
           "deliveryHistory.action": {
             $in: ["assigned", "reassigned"],
           },
+        },
+      },
+      {
+        $group: {
+          _id: "$_id",
         },
       },
       {
@@ -316,26 +483,34 @@ const getEmployeeStats = async (employeeId) => {
   ]);
 
   const counts = Object.fromEntries(
-    current.map((item) => [item._id || "unassigned", item.count]),
+    current.map((item) => [item._id, item.count]),
   );
+
+  const assigned = counts.assigned || 0;
+  const received = counts.received || 0;
 
   return {
     totalAssigned: historical[0]?.total || 0,
-    currentlyAssigned: (counts.assigned || 0) + (counts.received || 0),
-    received: counts.received || 0,
+    currentlyAssigned: assigned + received,
+    received,
     delivered: counts.delivered || 0,
     rejected: counts.rejected || 0,
     cancelled: counts.cancelled || 0,
-    pending: (counts.assigned || 0) + (counts.received || 0),
+    pending: assigned + received,
   };
 };
+
+/* =========================================================
+   ALL EMPLOYEE REPORTS
+========================================================= */
 
 export const getEmployeeReportSummary = async (req, res) => {
   try {
     const employees = await Customer.find({
       role: "employee",
     })
-      .select("name email phone role isActive")
+      .select("_id name email phone role isActive")
+      .sort({ createdAt: -1 })
       .lean();
 
     const data = await Promise.all(
@@ -347,10 +522,11 @@ export const getEmployeeReportSummary = async (req, res) => {
 
     return res.status(200).json({
       success: true,
+      count: data.length,
       data,
     });
   } catch (error) {
-    console.error("getEmployeeReportSummary:", error);
+    console.error("getEmployeeReportSummary error:", error);
 
     return res.status(500).json({
       success: false,
@@ -359,11 +535,15 @@ export const getEmployeeReportSummary = async (req, res) => {
   }
 };
 
+/* =========================================================
+   SINGLE EMPLOYEE REPORT
+========================================================= */
+
 export const getEmployeeReportById = async (req, res) => {
   try {
     const { employeeId } = req.params;
 
-    if (!mongoose.isValidObjectId(employeeId)) {
+    if (!isValidId(employeeId)) {
       return res.status(400).json({
         success: false,
         message: "Invalid employee ID",
@@ -374,7 +554,7 @@ export const getEmployeeReportById = async (req, res) => {
       _id: employeeId,
       role: "employee",
     })
-      .select("name email phone role isActive")
+      .select("_id name email phone role isActive")
       .lean();
 
     if (!employee) {
@@ -394,7 +574,7 @@ export const getEmployeeReportById = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("getEmployeeReportById:", error);
+    console.error("getEmployeeReportById error:", error);
 
     return res.status(500).json({
       success: false,
@@ -403,11 +583,15 @@ export const getEmployeeReportById = async (req, res) => {
   }
 };
 
+/* =========================================================
+   GET ACTIVE EMPLOYEES FOR ASSIGNMENT
+========================================================= */
+
 export const getEmployees = async (req, res) => {
   try {
     const employees = await Customer.find({
       role: "employee",
-      isActive: true,
+      isActive: { $ne: false },
     })
       .select("_id name email phone role isActive")
       .sort({ createdAt: -1 })
@@ -419,11 +603,11 @@ export const getEmployees = async (req, res) => {
       data: employees,
     });
   } catch (error) {
-    console.error("Get employees error:", error);
+    console.error("getEmployees error:", error);
 
     return res.status(500).json({
       success: false,
-      message: "Employee load failed",
+      message: "Failed to load employees",
     });
   }
 };

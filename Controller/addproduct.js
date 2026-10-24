@@ -10,75 +10,31 @@ import {
   SubChildCategory,
 } from "../Model/Catagori.js";
 
+import {
+  getProductCache,
+  setProductCache,
+  clearProductCache,
+} from "../utils/productCache.js";
+
 /* =====================================================
-   1. CACHE
+   1. REDIS CACHE HELPERS
 ===================================================== */
 
-const CACHE_TTL = 15_000;
-const MAX_CACHE_ITEMS = 200;
-const responseCache = new Map();
-
-const getCached = (key) => {
-  const item = responseCache.get(key);
-
-  if (!item) return null;
-
-  if (item.expiresAt <= Date.now()) {
-    responseCache.delete(key);
-    return null;
-  }
-
-  // Recently used item goes to the end.
-  responseCache.delete(key);
-  responseCache.set(key, item);
-
-  return item.data;
-};
-
-const setCached = (key, data) => {
-  responseCache.delete(key);
-
-  while (responseCache.size >= MAX_CACHE_ITEMS) {
-    const oldestKey = responseCache.keys().next().value;
-
-    if (oldestKey === undefined) break;
-
-    responseCache.delete(oldestKey);
-  }
-
-  responseCache.set(key, {
-    data,
-    expiresAt: Date.now() + CACHE_TTL,
-  });
-};
-
-export const clearProductCache = () => {
-  responseCache.clear();
-};
-
-export const productCache = (req, res, next) => {
-  if (req.method !== "GET") return next();
-
-  const key = `products:${req.originalUrl}`;
-  const cached = getCached(key);
+const getCachedResponse = async (res, key) => {
+  const cached = await getProductCache(key);
 
   if (cached !== null) {
     res.set("X-Cache", "HIT");
-    return res.status(200).json(cached);
+    return { hit: true, data: cached };
   }
 
-  const originalJson = res.json.bind(res);
+  return { hit: false, data: null };
+};
 
-  res.json = (data) => {
-    if (res.statusCode >= 200 && res.statusCode < 300) {
-      setCached(key, data);
-      res.set("X-Cache", "MISS");
-    }
-
-    return originalJson(data);
-  };
-
-  next();
+const sendCachedResponse = async (res, key, data, status = 200) => {
+  await setProductCache(key, data);
+  res.set("X-Cache", "MISS");
+  return res.status(status).json(data);
 };
 
 /* =====================================================
@@ -98,8 +54,7 @@ const toBoolean = (value) =>
   value === "1";
 
 const isValidObjectId = (id) =>
-  typeof id === "string" &&
-  mongoose.Types.ObjectId.isValid(id);
+  typeof id === "string" && mongoose.Types.ObjectId.isValid(id);
 
 const uniqueStrings = (items = []) => [
   ...new Set(
@@ -145,22 +100,14 @@ const parseArrayField = (body, field, fallback = []) => {
   return value;
 };
 
-const parseNumber = (
-  value,
-  field,
-  { min = 0, max = Infinity } = {}
-) => {
+const parseNumber = (value, field, { min = 0, max = Infinity } = {}) => {
   if (value === undefined || value === null || value === "") {
     throw new Error(`${field} is required`);
   }
 
   const number = Number(value);
 
-  if (
-    !Number.isFinite(number) ||
-    number < min ||
-    number > max
-  ) {
+  if (!Number.isFinite(number) || number < min || number > max) {
     throw new Error(`Invalid ${field}`);
   }
 
@@ -242,16 +189,12 @@ const validateCategories = async (body) => {
       isActive: { $ne: false },
     }).select("_id").lean();
 
-    if (!sub) {
-      throw new Error("Invalid sub category parent");
-    }
+    if (!sub) throw new Error("Invalid sub category parent");
   }
 
   if (childCategory) {
     if (!subCategory) {
-      throw new Error(
-        "Sub category is required for child category"
-      );
+      throw new Error("Sub category is required for child category");
     }
 
     if (!isValidObjectId(childCategory)) {
@@ -265,9 +208,7 @@ const validateCategories = async (body) => {
       isActive: { $ne: false },
     }).select("_id").lean();
 
-    if (!child) {
-      throw new Error("Invalid child category parent");
-    }
+    if (!child) throw new Error("Invalid child category parent");
   }
 
   if (subChildCategory) {
@@ -313,9 +254,7 @@ const normalizeVariants = (variants) =>
       typeof variant !== "object" ||
       Array.isArray(variant)
     ) {
-      throw new Error(
-        `Variant ${index + 1} must be an object`
-      );
+      throw new Error(`Variant ${index + 1} must be an object`);
     }
 
     const result = { ...variant };
@@ -328,17 +267,11 @@ const normalizeVariants = (variants) =>
       result.price = parseNumber(result.price, "variant price");
     }
 
-    if (result.ram != null) {
-      result.ram = cleanString(result.ram);
-    }
-
+    if (result.ram != null) result.ram = cleanString(result.ram);
     if (result.storage != null) {
       result.storage = cleanString(result.storage);
     }
-
-    if (result.sku != null) {
-      result.sku = cleanString(result.sku);
-    }
+    if (result.sku != null) result.sku = cleanString(result.sku);
 
     if (result.color && typeof result.color === "object") {
       result.color = {
@@ -361,7 +294,6 @@ const saveProduct = async (req, res, isUpdate = false) => {
     const body = req.body || {};
     let existingProduct = null;
 
-    // Find existing product when updating.
     if (isUpdate) {
       const { id } = req.params;
 
@@ -382,7 +314,6 @@ const saveProduct = async (req, res, isUpdate = false) => {
       }
     }
 
-    // Keep the old value when an update field is omitted.
     const getValue = (field, fallback = "") =>
       hasOwn(body, field)
         ? body[field]
@@ -412,13 +343,11 @@ const saveProduct = async (req, res, isUpdate = false) => {
       );
     }
 
-    const rating = parseNumber(
-      getValue("rating", 0),
-      "rating",
-      { min: 0, max: 5 }
-    );
+    const rating = parseNumber(getValue("rating", 0), "rating", {
+      min: 0,
+      max: 5,
+    });
 
-    // Parse arrays.
     const colorsInput = parseArrayField(
       body,
       "colors",
@@ -450,10 +379,10 @@ const saveProduct = async (req, res, isUpdate = false) => {
     );
 
     const descriptionSectionsInput = parseArrayField(
-  body,
-  "descriptionSections",
-  getOldArray(existingProduct, "descriptionSections")
-);
+      body,
+      "descriptionSections",
+      getOldArray(existingProduct, "descriptionSections")
+    );
 
     const variantsInput = parseArrayField(
       body,
@@ -469,7 +398,6 @@ const saveProduct = async (req, res, isUpdate = false) => {
 
     const variants = normalizeVariants(variantsInput);
 
-    // Validate additional category IDs.
     if (
       additionalCategoriesInput.some(
         (id) => !isValidObjectId(String(id))
@@ -482,7 +410,6 @@ const saveProduct = async (req, res, isUpdate = false) => {
       additionalCategoriesInput
     );
 
-    // Validate the category hierarchy.
     const categories = await validateCategories({
       category: getValue(
         "category",
@@ -502,7 +429,6 @@ const saveProduct = async (req, res, isUpdate = false) => {
       ),
     });
 
-    // Prevent duplicate slugs.
     const duplicate = await Product.exists({
       slug,
       ...(isUpdate
@@ -511,26 +437,18 @@ const saveProduct = async (req, res, isUpdate = false) => {
     });
 
     if (duplicate) {
-      throw new Error(
-        `Product with slug "${slug}" already exists`
-      );
+      throw new Error(`Product with slug "${slug}" already exists`);
     }
-
-    /* ---------- PRODUCT IMAGES ---------- */
 
     const files = req.files || {};
 
-    const newImages = (files.images || []).map(
-      (file) => file.path
-    );
-
+    const newImages = (files.images || []).map((file) => file.path);
     const newColorImages = (files.colorImages || []).map(
       (file) => file.path
     );
-
     const newDescriptionSectionImages = (
-  files.descriptionSectionImages || []
-).map((file) => file.path);
+      files.descriptionSectionImages || []
+    ).map((file) => file.path);
 
     const oldImages = Array.isArray(existingProduct?.images)
       ? existingProduct.images
@@ -545,11 +463,9 @@ const saveProduct = async (req, res, isUpdate = false) => {
       throw new Error("Existing images must be an array");
     }
 
-    // Retain only images already associated with this product.
     const retainedImages = submittedExistingImages.filter(
       (image) =>
-        typeof image === "string" &&
-        oldImages.includes(image)
+        typeof image === "string" && oldImages.includes(image)
     );
 
     const images = isUpdate
@@ -559,8 +475,6 @@ const saveProduct = async (req, res, isUpdate = false) => {
     if (images.length === 0) {
       throw new Error("At least one product image is required");
     }
-
-    /* ---------- COLOR IMAGES ---------- */
 
     let colorImageIndex = 0;
 
@@ -581,10 +495,7 @@ const saveProduct = async (req, res, isUpdate = false) => {
         toBoolean(safeColor.imageFile) ||
         !image;
 
-      if (
-        needsNewImage &&
-        newColorImages[colorImageIndex]
-      ) {
+      if (needsNewImage && newColorImages[colorImageIndex]) {
         image = newColorImages[colorImageIndex];
         colorImageIndex++;
       }
@@ -597,87 +508,65 @@ const saveProduct = async (req, res, isUpdate = false) => {
       };
     });
 
-    /* ---------- DISCOUNT ---------- */
-
     const calculatedDiscountPercentage =
       discountPrice !== null && price > 0
         ? Number(
-            (
-              ((price - discountPrice) / price) *
-              100
-            ).toFixed(2)
+            (((price - discountPrice) / price) * 100).toFixed(2)
           )
         : 0;
 
     const discountPercentage =
       hasOwn(body, "discountPercentage") &&
       body.discountPercentage !== ""
-        ? parseNumber(
-            body.discountPercentage,
-            "discount percentage",
-            { min: 0, max: 100 }
-          )
+        ? parseNumber(body.discountPercentage, "discount percentage", {
+            min: 0,
+            max: 100,
+          })
         : calculatedDiscountPercentage;
-
-    /* ---------- PRODUCT DATA ---------- */
 
     const productData = {
       name,
       slug,
-
       description: cleanString(getValue("description")),
       shortDescription: cleanString(
         getValue("shortDescription")
       ),
-
       ...categories,
       additionalCategories,
-
       brand: cleanString(getValue("brand")),
-
       price,
       discountPrice,
       discountPercentage,
       stock,
-
       sku: cleanString(getValue("sku")),
-
       colors,
       sizes: uniqueStrings(sizesInput),
       ram: uniqueStrings(ramInput),
       specifications,
       keyFeatures,
 
-
-descriptionSections: descriptionSectionsInput.map(
-  (section) => ({
-    title: cleanString(section.title),
-    description: cleanString(section.description),
-
-    image:
-      section.imageIndex !== null &&
-      section.imageIndex !== undefined &&
-      newDescriptionSectionImages[section.imageIndex]
-        ? newDescriptionSectionImages[section.imageIndex]
-        : cleanString(section.image || ""),
-  })
-),
-
-
+      descriptionSections: descriptionSectionsInput.map(
+        (section) => ({
+          title: cleanString(section.title),
+          description: cleanString(section.description),
+          image:
+            section.imageIndex !== null &&
+            section.imageIndex !== undefined &&
+            newDescriptionSectionImages[section.imageIndex]
+              ? newDescriptionSectionImages[section.imageIndex]
+              : cleanString(section.image || ""),
+        })
+      ),
 
       variants,
-
       rating,
-
       metaTitle: cleanString(getValue("metaTitle")),
       metaDescription: cleanString(
         getValue("metaDescription")
       ),
-
       images,
     };
 
-    // Set defaults for new products.
     const booleanFields = [
       ["isActive", true],
       ["isFeatured", false],
@@ -693,7 +582,6 @@ descriptionSections: descriptionSectionsInput.map(
       }
     }
 
-    // Save product.
     let product;
 
     if (isUpdate) {
@@ -703,7 +591,7 @@ descriptionSections: descriptionSectionsInput.map(
       product = await Product.create(productData);
     }
 
-    clearProductCache();
+    await clearProductCache();
 
     return res.status(isUpdate ? 200 : 201).json({
       success: true,
@@ -754,10 +642,6 @@ descriptionSections: descriptionSectionsInput.map(
   }
 };
 
-/* =====================================================
-   7. EXPORTED ADD / UPDATE FUNCTIONS
-===================================================== */
-
 export const addProduct = (req, res) =>
   saveProduct(req, res, false);
 
@@ -765,7 +649,7 @@ export const updateProduct = (req, res) =>
   saveProduct(req, res, true);
 
 /* =====================================================
-   8. FIND CATEGORY BY SLUG
+   7. CATEGORY HELPERS
 ===================================================== */
 
 const findCategoryBySlug = async (slug) => {
@@ -783,19 +667,12 @@ const findCategoryBySlug = async (slug) => {
     }).lean();
 
     if (category) {
-      return {
-        category,
-        level: item.level,
-      };
+      return { category, level: item.level };
     }
   }
 
   return null;
 };
-
-/* =====================================================
-   9. GET ALL CATEGORY IDS UNDER A CATEGORY
-===================================================== */
 
 const getCategoryIds = async (category, level) => {
   const ids = [category._id];
@@ -856,12 +733,79 @@ const getCategoryIds = async (category, level) => {
   return uniqueIds(ids);
 };
 
+const applyCategoryFilter = async (filter, slug) => {
+  const found = await findCategoryBySlug(slug);
+
+  if (!found) return null;
+
+  const { category, level } = found;
+  const ids = await getCategoryIds(category, level);
+
+  if (level === "main") {
+    filter.$or = [
+      { category: { $in: ids } },
+      { subCategory: { $in: ids } },
+      { childCategory: { $in: ids } },
+      { subChildCategory: { $in: ids } },
+      { additionalCategories: { $in: ids } },
+    ];
+  } else if (level === "sub") {
+    filter.$or = [
+      { subCategory: category._id },
+      { childCategory: { $in: ids } },
+      { subChildCategory: { $in: ids } },
+      { additionalCategories: { $in: ids } },
+    ];
+  } else if (level === "child") {
+    filter.$or = [
+      { childCategory: category._id },
+      { subChildCategory: { $in: ids } },
+      { additionalCategories: { $in: ids } },
+    ];
+  } else {
+    filter.$or = [
+      { subChildCategory: category._id },
+      { additionalCategories: category._id },
+    ];
+  }
+
+  return found;
+};
+
+const emptyProductListResponse = (page, limit, message) => ({
+  success: true,
+  count: 0,
+  total: 0,
+  page,
+  limit,
+  totalPages: 0,
+  products: [],
+  category: null,
+  filters: {
+    brands: [],
+    series: [],
+    displaySizes: [],
+    storage: [],
+    processors: [],
+    colors: [],
+    price: { min: 0, max: 0 },
+  },
+  ...(message ? { message } : {}),
+});
+
 /* =====================================================
-   10. GET ALL PRODUCTS WITH FILTERS
-   GET /products/getALLproducts?page=1&limit=12
+   8. GET ALL PRODUCTS WITH FILTERS
 ===================================================== */
+
 export const getAllProduct = async (req, res) => {
   try {
+    const cacheKey = `all:${JSON.stringify(req.query)}`;
+    const cached = await getCachedResponse(res, cacheKey);
+
+    if (cached.hit) {
+      return res.status(200).json(cached.data);
+    }
+
     const page = Math.max(
       1,
       Number.parseInt(req.query.page, 10) || 1
@@ -869,102 +813,37 @@ export const getAllProduct = async (req, res) => {
 
     const limit = Math.min(
       48,
-      Math.max(
-        1,
-        Number.parseInt(req.query.limit, 10) || 12
-      )
+      Math.max(1, Number.parseInt(req.query.limit, 10) || 12)
     );
 
     const skip = (page - 1) * limit;
-
-    const categoryQuery = cleanString(
-      req.query.category
-    ).toLowerCase();
-
+    const categoryQuery = cleanString(req.query.category).toLowerCase();
     const brandQuery = cleanString(req.query.brand);
-    const stockQuery = cleanString(
-      req.query.stock
-    ).toLowerCase();
-
-    // ---------- নতুন: Offer filter ----------
-    const offerQuery = cleanString(
-      req.query.offer
-    ).toLowerCase(); // true / 1 / yes
-
-    const sortQuery =
-      cleanString(req.query.sort) || "newest";
+    const stockQuery = cleanString(req.query.stock).toLowerCase();
+    const offerQuery = cleanString(req.query.offer).toLowerCase();
+    const sortQuery = cleanString(req.query.sort) || "newest";
 
     const filter = {};
 
-    /* ---------- CATEGORY FILTER ---------- */
     if (categoryQuery) {
-      const found = await findCategoryBySlug(categoryQuery);
+      const found = await applyCategoryFilter(filter, categoryQuery);
 
       if (!found) {
-        return res.status(200).json({
-          success: true,
-          count: 0,
-          total: 0,
-          page,
-          limit,
-          totalPages: 0,
-          products: [],
-          category: null,
-          filters: {
-            brands: [],
-            series: [],
-            displaySizes: [],
-            storage: [],
-            processors: [],
-            colors: [],
-            price: { min: 0, max: 0 },
-          },
-        });
-      }
-
-      const { category, level } = found;
-      const ids = await getCategoryIds(category, level);
-
-      if (level === "main") {
-        filter.$or = [
-          { category: { $in: ids } },
-          { subCategory: { $in: ids } },
-          { childCategory: { $in: ids } },
-          { subChildCategory: { $in: ids } },
-          { additionalCategories: { $in: ids } },
-        ];
-      } else if (level === "sub") {
-        filter.$or = [
-          { subCategory: category._id },
-          { childCategory: { $in: ids } },
-          { subChildCategory: { $in: ids } },
-          { additionalCategories: { $in: ids } },
-        ];
-      } else if (level === "child") {
-        filter.$or = [
-          { childCategory: category._id },
-          { subChildCategory: { $in: ids } },
-          { additionalCategories: { $in: ids } },
-        ];
-      } else {
-        filter.$or = [
-          { subChildCategory: category._id },
-          { additionalCategories: category._id },
-        ];
+        return sendCachedResponse(
+          res,
+          cacheKey,
+          emptyProductListResponse(page, limit),
+          200
+        );
       }
     }
 
-    /* ---------- BRAND FILTER ---------- */
     if (brandQuery) {
       filter.brand = {
-        $in: brandQuery
-          .split(",")
-          .map((brand) => brand.trim())
-          .filter(Boolean),
+        $in: brandQuery.split(",").map((brand) => brand.trim()).filter(Boolean),
       };
     }
 
-    /* ---------- PRICE FILTER ---------- */
     if (
       req.query.minPrice !== undefined ||
       req.query.maxPrice !== undefined
@@ -980,10 +859,8 @@ export const getAllProduct = async (req, res) => {
           : Number(req.query.maxPrice);
 
       if (
-        (min !== null &&
-          (!Number.isFinite(min) || min < 0)) ||
-        (max !== null &&
-          (!Number.isFinite(max) || max < 0)) ||
+        (min !== null && (!Number.isFinite(min) || min < 0)) ||
+        (max !== null && (!Number.isFinite(max) || max < 0)) ||
         (min !== null && max !== null && min > max)
       ) {
         return res.status(400).json({
@@ -995,21 +872,16 @@ export const getAllProduct = async (req, res) => {
       const conditions = [];
 
       if (min !== null) {
-        conditions.push({
-          $gte: [effectivePriceExpression, min],
-        });
+        conditions.push({ $gte: [effectivePriceExpression, min] });
       }
 
       if (max !== null) {
-        conditions.push({
-          $lte: [effectivePriceExpression, max],
-        });
+        conditions.push({ $lte: [effectivePriceExpression, max] });
       }
 
       filter.$expr = { $and: conditions };
     }
 
-    /* ---------- STOCK FILTER ---------- */
     if (stockQuery === "in-stock") {
       filter.stock = { $gt: 0 };
     }
@@ -1018,39 +890,19 @@ export const getAllProduct = async (req, res) => {
       filter.stock = { $lte: 0 };
     }
 
-    /* ---------- OFFER FILTER (নতুন) ---------- */
-    // offer=true হলে শুধু যেগুলোর discountPrice < price আছে সেগুলো
-    if (
-      offerQuery === "true" ||
-      offerQuery === "1" ||
-      offerQuery === "yes"
-    ) {
-      // যদি আগে থেকে $expr থাকে (price filter), তাহলে merge করো
-      if (filter.$expr) {
-        filter.$expr = {
-          $and: [
-            filter.$expr,
-            { $lt: ["$discountPrice", "$price"] },
-            { $gt: ["$discountPrice", 0] }, // discountPrice আছে কিনা
-          ],
-        };
-      } else {
-        filter.$expr = {
-          $and: [
-            { $lt: ["$discountPrice", "$price"] },
-            { $gt: ["$discountPrice", 0] },
-          ],
-        };
-      }
+    if (["true", "1", "yes"].includes(offerQuery)) {
+      const offerConditions = [
+        { $lt: ["$discountPrice", "$price"] },
+        { $gt: ["$discountPrice", 0] },
+      ];
 
-      // অতিরিক্ত নিরাপত্তা (optional)
-      // filter.discountPercentage = { $gt: 0 };
+      filter.$expr = filter.$expr
+        ? { $and: [filter.$expr, ...offerConditions] }
+        : { $and: offerConditions };
     }
 
-    const sortOption =
-      sortOptions[sortQuery] || sortOptions.newest;
+    const sortOption = sortOptions[sortQuery] || sortOptions.newest;
 
-    /* ---------- DATABASE QUERIES ---------- */
     const [products, total, facetRows] = await Promise.all([
       Product.find(filter)
         .select("-__v")
@@ -1107,48 +959,34 @@ export const getAllProduct = async (req, res) => {
 
     const facet = facetRows[0] || {};
 
-    /* ---------- STORAGE OPTIONS ---------- */
     const storageValues = [
       ...(facet.storageFields || []).flatMap((value) =>
-        Array.isArray(value)
-          ? value
-          : value
-            ? [value]
-            : []
+        Array.isArray(value) ? value : value ? [value] : []
       ),
       ...(facet.variants || []).flatMap((variants) =>
         Array.isArray(variants)
-          ? variants
-              .map((variant) => variant?.storage)
-              .filter(Boolean)
+          ? variants.map((variant) => variant?.storage).filter(Boolean)
           : []
       ),
     ];
 
-    /* ---------- COLOR OPTIONS ---------- */
-    const colorValues = (facet.colors || []).flatMap(
-      (colors) =>
-        Array.isArray(colors)
-          ? colors.map((color) =>
-              typeof color === "string"
-                ? color
-                : color?.name
-            )
-          : []
+    const colorValues = (facet.colors || []).flatMap((colors) =>
+      Array.isArray(colors)
+        ? colors.map((color) =>
+            typeof color === "string" ? color : color?.name
+          )
+        : []
     );
 
-    /* ---------- PRICE RANGE ---------- */
     const validPrices = (facet.prices || []).filter(
-      (price) =>
-        typeof price === "number" && Number.isFinite(price)
+      (price) => typeof price === "number" && Number.isFinite(price)
     );
 
     const selected = categoryQuery
       ? await findCategoryBySlug(categoryQuery)
       : null;
 
-    /* ---------- RESPONSE ---------- */
-    return res.status(200).json({
+    const response = {
       success: true,
       count: products.length,
       total,
@@ -1161,34 +999,27 @@ export const getAllProduct = async (req, res) => {
         ? {
             name: selected.category.name,
             slug: selected.category.slug,
-            mainCategory:
-              selected.category.mainCategory || null,
-            subCategory:
-              selected.category.subCategory || null,
-            childCategory:
-              selected.category.childCategory || null,
+            mainCategory: selected.category.mainCategory || null,
+            subCategory: selected.category.subCategory || null,
+            childCategory: selected.category.childCategory || null,
           }
         : null,
 
       filters: {
         brands: uniqueStrings(facet.brands || []),
         series: uniqueStrings(facet.series || []),
-        displaySizes: uniqueStrings(
-          facet.displaySizes || []
-        ),
+        displaySizes: uniqueStrings(facet.displaySizes || []),
         storage: uniqueStrings(storageValues),
         processors: uniqueStrings(facet.processors || []),
         colors: uniqueStrings(colorValues),
         price: {
-          min: validPrices.length
-            ? Math.min(...validPrices)
-            : 0,
-          max: validPrices.length
-            ? Math.max(...validPrices)
-            : 0,
+          min: validPrices.length ? Math.min(...validPrices) : 0,
+          max: validPrices.length ? Math.max(...validPrices) : 0,
         },
       },
-    });
+    };
+
+    return sendCachedResponse(res, cacheKey, response);
   } catch (error) {
     console.error("GET ALL PRODUCT ERROR:", error);
 
@@ -1200,12 +1031,18 @@ export const getAllProduct = async (req, res) => {
 };
 
 /* =====================================================
-   11. SEARCH PRODUCTS
-   GET /products?search=iphone&page=1&limit=12
+   9. SEARCH PRODUCTS
 ===================================================== */
 
 export const getProducts = async (req, res) => {
   try {
+    const cacheKey = `search:${JSON.stringify(req.query)}`;
+    const cached = await getCachedResponse(res, cacheKey);
+
+    if (cached.hit) {
+      return res.status(200).json(cached.data);
+    }
+
     const page = Math.max(
       1,
       Number.parseInt(req.query.page, 10) || 1
@@ -1213,15 +1050,11 @@ export const getProducts = async (req, res) => {
 
     const limit = Math.min(
       48,
-      Math.max(
-        1,
-        Number.parseInt(req.query.limit, 10) || 12
-      )
+      Math.max(1, Number.parseInt(req.query.limit, 10) || 12)
     );
 
     const skip = (page - 1) * limit;
     const search = cleanString(req.query.search);
-
     const filter = {};
 
     if (search) {
@@ -1245,7 +1078,7 @@ export const getProducts = async (req, res) => {
       Product.countDocuments(filter),
     ]);
 
-    return res.status(200).json({
+    const response = {
       success: true,
       count: products.length,
       total,
@@ -1253,7 +1086,9 @@ export const getProducts = async (req, res) => {
       limit,
       totalPages: Math.ceil(total / limit),
       products,
-    });
+    };
+
+    return sendCachedResponse(res, cacheKey, response);
   } catch (error) {
     console.error("GET PRODUCTS ERROR:", error);
 
@@ -1265,7 +1100,7 @@ export const getProducts = async (req, res) => {
 };
 
 /* =====================================================
-   12. GET PRODUCT BY ID
+   10. GET PRODUCT BY ID
 ===================================================== */
 
 export const getProductById = async (req, res) => {
@@ -1277,6 +1112,13 @@ export const getProductById = async (req, res) => {
         success: false,
         message: "Invalid product ID",
       });
+    }
+
+    const cacheKey = `by-id:${id}`;
+    const cached = await getCachedResponse(res, cacheKey);
+
+    if (cached.hit) {
+      return res.status(200).json(cached.data);
     }
 
     const product = await Product.findById(id)
@@ -1294,7 +1136,7 @@ export const getProductById = async (req, res) => {
       });
     }
 
-    return res.status(200).json({
+    return sendCachedResponse(res, cacheKey, {
       success: true,
       product,
     });
@@ -1309,7 +1151,7 @@ export const getProductById = async (req, res) => {
 };
 
 /* =====================================================
-   13. DELETE PRODUCT
+   11. DELETE PRODUCT
 ===================================================== */
 
 export const deleteProduct = async (req, res) => {
@@ -1332,14 +1174,12 @@ export const deleteProduct = async (req, res) => {
       });
     }
 
-    clearProductCache();
+    await clearProductCache();
 
     return res.status(200).json({
       success: true,
       message: "Product deleted successfully",
-      data: {
-        id: product._id,
-      },
+      data: { id: product._id },
     });
   } catch (error) {
     console.error("DELETE PRODUCT ERROR:", error);
@@ -1351,15 +1191,8 @@ export const deleteProduct = async (req, res) => {
   }
 };
 
-
-
-
-
-
-
 /* =====================================================
-   CREATE REVIEW
-   POST /products/:productId/reviews
+   12. CREATE REVIEW
 ===================================================== */
 
 export const createReview = async (req, res) => {
@@ -1383,14 +1216,8 @@ export const createReview = async (req, res) => {
       });
     }
 
-    const cleanName = String(
-      name || userName || ""
-    ).trim();
-
-    const cleanReview = String(
-      review || comment || ""
-    ).trim();
-
+    const cleanName = String(name || userName || "").trim();
+    const cleanReview = String(review || comment || "").trim();
     const numericRating = Number(rating);
 
     if (!cleanName || cleanName.length > 80) {
@@ -1411,19 +1238,14 @@ export const createReview = async (req, res) => {
       });
     }
 
-    if (
-      !cleanReview ||
-      cleanReview.length > 3000
-    ) {
+    if (!cleanReview || cleanReview.length > 3000) {
       return res.status(400).json({
         success: false,
         message: "Review is required (maximum 3000 characters).",
       });
     }
 
-    const product = await Product.findById(
-      productId
-    ).select("name slug");
+    const product = await Product.findById(productId).select("name slug");
 
     if (!product) {
       return res.status(404).json({
@@ -1432,8 +1254,6 @@ export const createReview = async (req, res) => {
       });
     }
 
-    // Images have already been uploaded to Cloudinary
-    // by your existing multer-storage-cloudinary middleware.
     const images = (req.files || []).map((file) => ({
       url: file.path,
       publicId: file.filename,
@@ -1468,8 +1288,7 @@ export const createReview = async (req, res) => {
 };
 
 /* =====================================================
-   GET PRODUCT REVIEWS
-   GET /products/:productId/reviews
+   13. GET PRODUCT REVIEWS
 ===================================================== */
 
 export const getProductReviews = async (req, res) => {
@@ -1483,9 +1302,7 @@ export const getProductReviews = async (req, res) => {
       });
     }
 
-    const exists = await Product.exists({
-      _id: productId,
-    });
+    const exists = await Product.exists({ _id: productId });
 
     if (!exists) {
       return res.status(404).json({
@@ -1498,14 +1315,12 @@ export const getProductReviews = async (req, res) => {
     const requestedLimit = Number(req.query.limit);
 
     const page =
-      Number.isInteger(requestedPage) &&
-      requestedPage > 0
+      Number.isInteger(requestedPage) && requestedPage > 0
         ? requestedPage
         : 1;
 
     const limit =
-      Number.isInteger(requestedLimit) &&
-      requestedLimit > 0
+      Number.isInteger(requestedLimit) && requestedLimit > 0
         ? Math.min(requestedLimit, 100)
         : 50;
 
@@ -1513,36 +1328,28 @@ export const getProductReviews = async (req, res) => {
       productId: new mongoose.Types.ObjectId(productId),
     };
 
-    const [reviews, total, ratingStats] =
-      await Promise.all([
-        Review.find(filter)
-          .sort({ createdAt: -1, _id: -1 })
-          .skip((page - 1) * limit)
-          .limit(limit)
-          .lean(),
+    const [reviews, total, ratingStats] = await Promise.all([
+      Review.find(filter)
+        .sort({ createdAt: -1, _id: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean(),
 
-        Review.countDocuments(filter),
+      Review.countDocuments(filter),
 
-        Review.aggregate([
-          { $match: filter },
-          {
-            $group: {
-              _id: "$rating",
-              count: { $sum: 1 },
-              sum: { $sum: "$rating" },
-            },
+      Review.aggregate([
+        { $match: filter },
+        {
+          $group: {
+            _id: "$rating",
+            count: { $sum: 1 },
+            sum: { $sum: "$rating" },
           },
-        ]),
-      ]);
+        },
+      ]),
+    ]);
 
-    const counts = {
-      1: 0,
-      2: 0,
-      3: 0,
-      4: 0,
-      5: 0,
-    };
-
+    const counts = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
     let ratingSum = 0;
 
     for (const item of ratingStats) {
@@ -1555,10 +1362,7 @@ export const getProductReviews = async (req, res) => {
       reviews,
       data: reviews,
       total,
-      average:
-        total > 0
-          ? Number((ratingSum / total).toFixed(2))
-          : 0,
+      average: total > 0 ? Number((ratingSum / total).toFixed(2)) : 0,
       counts,
       page,
       limit,
@@ -1575,8 +1379,7 @@ export const getProductReviews = async (req, res) => {
 };
 
 /* =====================================================
-   GET REVIEW SUMMARY
-   GET /products/:productId/reviews/summary
+   14. GET REVIEW SUMMARY
 ===================================================== */
 
 export const getReviewSummary = async (req, res) => {
@@ -1607,14 +1410,7 @@ export const getReviewSummary = async (req, res) => {
     ]);
 
     const result = summary[0];
-
-    const counts = {
-      1: 0,
-      2: 0,
-      3: 0,
-      4: 0,
-      5: 0,
-    };
+    const counts = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
 
     for (const rating of result?.ratings || []) {
       counts[rating] += 1;
@@ -1623,9 +1419,7 @@ export const getReviewSummary = async (req, res) => {
     return res.status(200).json({
       success: true,
       total: result?.total || 0,
-      average: result
-        ? Number(result.average.toFixed(2))
-        : 0,
+      average: result ? Number(result.average.toFixed(2)) : 0,
       counts,
     });
   } catch (error) {
@@ -1638,12 +1432,19 @@ export const getReviewSummary = async (req, res) => {
   }
 };
 
-
-// GET /products/desktop-products
-// আলাদা Desktop / PC products API
+/* =====================================================
+   15. GET DESKTOP PRODUCTS
+===================================================== */
 
 export const getDesktopProducts = async (req, res) => {
   try {
+    const cacheKey = `desktop:${JSON.stringify(req.query)}`;
+    const cached = await getCachedResponse(res, cacheKey);
+
+    if (cached.hit) {
+      return res.status(200).json(cached.data);
+    }
+
     const page = Math.max(
       1,
       Number.parseInt(req.query.page, 10) || 1
@@ -1651,28 +1452,22 @@ export const getDesktopProducts = async (req, res) => {
 
     const limit = Math.min(
       48,
-      Math.max(
-        1,
-        Number.parseInt(req.query.limit, 10) || 12
-      )
+      Math.max(1, Number.parseInt(req.query.limit, 10) || 12)
     );
 
     const skip = (page - 1) * limit;
 
     const categorySlug = String(
       req.query.category || "desktop-offer"
-    )
-      .trim()
-      .toLowerCase();
+    ).trim().toLowerCase();
 
     const filter = {};
 
-    // Category filter
     if (categorySlug && categorySlug !== "all") {
-      const found = await findCategoryBySlug(categorySlug);
+      const found = await applyCategoryFilter(filter, categorySlug);
 
       if (!found) {
-        return res.status(200).json({
+        const emptyResponse = {
           success: true,
           count: 0,
           total: 0,
@@ -1681,52 +1476,24 @@ export const getDesktopProducts = async (req, res) => {
           totalPages: 0,
           products: [],
           message: `Category not found: ${categorySlug}`,
-        });
-      }
+        };
 
-      const { category, level } = found;
-      const ids = await getCategoryIds(category, level);
-
-      if (level === "main") {
-        filter.$or = [
-          { category: { $in: ids } },
-          { subCategory: { $in: ids } },
-          { childCategory: { $in: ids } },
-          { subChildCategory: { $in: ids } },
-          { additionalCategories: { $in: ids } },
-        ];
-      } else if (level === "sub") {
-        filter.$or = [
-          { subCategory: category._id },
-          { childCategory: { $in: ids } },
-          { subChildCategory: { $in: ids } },
-          { additionalCategories: { $in: ids } },
-        ];
-      } else if (level === "child") {
-        filter.$or = [
-          { childCategory: category._id },
-          { subChildCategory: { $in: ids } },
-          { additionalCategories: { $in: ids } },
-        ];
-      } else {
-        filter.$or = [
-          { subChildCategory: category._id },
-          { additionalCategories: category._id },
-        ];
+        return sendCachedResponse(res, cacheKey, emptyResponse);
       }
     }
 
-    // Optional: offer=true দিলে শুধু discounted products
     const offer = String(req.query.offer || "").toLowerCase();
 
     if (["true", "1", "yes"].includes(offer)) {
-      filter.$expr = {
-        $and: [
-          { $gt: ["$price", 0] },
-          { $gt: ["$discountPrice", 0] },
-          { $lt: ["$discountPrice", "$price"] },
-        ],
-      };
+      const offerConditions = [
+        { $gt: ["$price", 0] },
+        { $gt: ["$discountPrice", 0] },
+        { $lt: ["$discountPrice", "$price"] },
+      ];
+
+      filter.$expr = filter.$expr
+        ? { $and: [filter.$expr, ...offerConditions] }
+        : { $and: offerConditions };
     }
 
     const [products, total] = await Promise.all([
@@ -1745,7 +1512,7 @@ export const getDesktopProducts = async (req, res) => {
       Product.countDocuments(filter),
     ]);
 
-    return res.status(200).json({
+    const response = {
       success: true,
       count: products.length,
       total,
@@ -1753,7 +1520,9 @@ export const getDesktopProducts = async (req, res) => {
       limit,
       totalPages: Math.ceil(total / limit),
       products,
-    });
+    };
+
+    return sendCachedResponse(res, cacheKey, response);
   } catch (error) {
     console.error("GET DESKTOP PRODUCTS ERROR:", error);
 

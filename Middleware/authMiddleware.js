@@ -14,66 +14,54 @@ export const verifyToken = asyncHandler(async (req, res, next) => {
       ? authHeader.slice(7).trim()
       : null);
 
-  // 2. Check token exists
   if (!token) {
-    return apiResponse(
-      res,
-      401,
-      "Access denied. Please login."
-    );
+    return apiResponse(res, 401, "Access denied. Please login.");
   }
 
-  // 3. Verify JWT
-  if (!process.env.JWT_ACCESS_SECRET) {
-    throw new Error("JWT_ACCESS_SECRET is missing");
+  // 2. Check JWT secret
+  const secret = process.env.JWT_ACCESS_SECRET;
+
+  if (!secret) {
+    console.error("JWT_ACCESS_SECRET is missing");
+    return apiResponse(res, 500, "Authentication configuration error");
   }
 
+  // 3. Verify token
   let decoded;
 
   try {
-    decoded = jwt.verify(
-      token,
-      process.env.JWT_ACCESS_SECRET
-    );
-  } catch {
+    decoded = jwt.verify(token, secret);
+  } catch (error) {
     return apiResponse(
       res,
       401,
-      "Invalid or expired token"
+      error.name === "TokenExpiredError"
+        ? "Token expired. Please login again."
+        : "Invalid token. Please login again."
     );
   }
 
-  // 4. Validate decoded user ID
-  if (!decoded?.id) {
-    return apiResponse(
-      res,
-      401,
-      "Invalid authentication token"
-    );
+  // 4. Support common JWT ID field names
+  const userId = decoded?.id || decoded?._id || decoded?.userId;
+
+  if (!userId) {
+    return apiResponse(res, 401, "User ID missing from authentication token");
   }
 
-  // 5. Find user in database
-  const customer = await Customer.findById(decoded.id);
+  // 5. Find authenticated user
+  const user = await Customer.findById(userId).select("-password");
 
-  if (!customer) {
-    return apiResponse(
-      res,
-      401,
-      "User not found"
-    );
+  if (!user) {
+    return apiResponse(res, 401, "User not found. Please login again.");
   }
 
   // 6. Check account status
-  if (customer.isActive === false) {
-    return apiResponse(
-      res,
-      403,
-      "Your account is inactive"
-    );
+  if (user.isActive === false) {
+    return apiResponse(res, 403, "Your account is inactive");
   }
 
-  // 7. Attach authenticated user
-  req.user = customer;
+  // 7. Attach user to request
+  req.user = user;
 
   return next();
 });

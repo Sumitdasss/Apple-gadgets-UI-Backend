@@ -98,7 +98,7 @@ router.get("/order-id/:orderId", getOrderByOrderId);
 router.get(
   "/me",
   verifyToken,
-  authorizeRoles("customer", "admin"),
+  authorizeRoles("customer","employee","admin"),
   getMyProfile
 );
 
@@ -167,7 +167,8 @@ router.delete("/deleteLandingPage/:id",  deleteLandingPage);
 // employeeMange route
 router.post("/assignOrder",  assignOrder);
 router.patch("/reassignOrder/:orderId", reassignOrder);
-router.get("/my-orders",  getMyOrders);
+router.get("/my-orders",
+  authorizeRoles("employee"),  getMyOrders);
 router.patch("/:orderId/status",updateEmployeeOrderStatus);
 router.get("/summary",  getEmployeeReportSummary);
 router.get("/getEmployees",  getEmployees);

@@ -460,3 +460,30 @@ export const getEmployeeReportById = async (req, res) => {
     });
   }
 };
+
+
+
+export const getEmployees = async (req, res) => {
+  try {
+    const employees = await Customer.find({
+      role: "employee",
+      isActive: true,
+    })
+      .select("_id name email phone role isActive")
+      .sort({ createdAt: -1 })
+      .lean();
+
+    return res.status(200).json({
+      success: true,
+      count: employees.length,
+      data: employees,
+    });
+  } catch (error) {
+    console.error("Get employees error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Employee load failed",
+    });
+  }
+};

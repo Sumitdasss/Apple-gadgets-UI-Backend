@@ -1,30 +1,9 @@
-
 import mongoose from "mongoose";
 import Order from "../Model/Order.js";
 import Customer from "../Model/Customer.js";
 
-const allowedRoles = [
-  "admin",
-  "subadmin",
-  "order_manager",
-];
-
-const canAssign = (req, res) => {
-  if (!req.user || !allowedRoles.includes(req.user.role)) {
-    res.status(403).json({
-      success: false,
-      message: "You are not allowed to assign orders",
-    });
-    return false;
-  }
-
-  return true;
-};
-
 export const assignOrder = async (req, res) => {
   try {
-    if (!canAssign(req, res)) return;
-
     const { orderId, employeeId, note = "" } = req.body;
 
     if (!orderId || !employeeId) {
@@ -77,11 +56,10 @@ export const assignOrder = async (req, res) => {
 
     const previousEmployee = order.assignedEmployee;
     const isReassignment =
-      previousEmployee &&
-      previousEmployee.toString() !== employeeId;
+      previousEmployee && previousEmployee.toString() !== employeeId;
 
     order.assignedEmployee = employee._id;
-    order.assignedBy = req.user._id;
+    order.assignedBy = req.user?._id || null;
     order.assignedAt = new Date();
     order.deliveryStatus = "assigned";
     order.deliveryNote = "";
@@ -89,7 +67,7 @@ export const assignOrder = async (req, res) => {
     order.deliveryHistory.push({
       action: isReassignment ? "reassigned" : "assigned",
       employee: employee._id,
-      changedBy: req.user._id,
+      changedBy: req.user?._id || null,
       note: String(note).slice(0, 500),
       changedAt: new Date(),
     });
@@ -119,15 +97,11 @@ export const assignOrder = async (req, res) => {
 };
 
 export const reassignOrder = async (req, res) => {
- req.body.orderId = req.params.orderId;
+  req.body.orderId = req.params.orderId;
   return assignOrder(req, res);
 };
 
-
-
-
-const getEmployeeId = (req) =>
-  req.user?._id || req.user?.id;
+const getEmployeeId = (req) => req.user?._id || req.user?.id;
 
 export const getMyOrders = async (req, res) => {
   try {
@@ -138,11 +112,7 @@ export const getMyOrders = async (req, res) => {
       });
     }
 
-    const {
-      page = 1,
-      limit = 20,
-      status,
-    } = req.query;
+    const { page = 1, limit = 20, status } = req.query;
 
     const pageNumber = Math.max(1, Number(page) || 1);
     const pageSize = Math.min(100, Math.max(1, Number(limit) || 20));
@@ -153,13 +123,9 @@ export const getMyOrders = async (req, res) => {
 
     if (
       status &&
-      [
-        "assigned",
-        "received",
-        "delivered",
-        "rejected",
-        "cancelled",
-      ].includes(status)
+      ["assigned", "received", "delivered", "rejected", "cancelled"].includes(
+        status,
+      )
     ) {
       filter.deliveryStatus = status;
     }
@@ -242,8 +208,7 @@ export const updateEmployeeOrderStatus = async (req, res) => {
       });
     }
 
-    const currentStatus =
-      order.deliveryStatus || "assigned";
+    const currentStatus = order.deliveryStatus || "assigned";
 
     if (!transitions[status].includes(currentStatus)) {
       return res.status(409).json({
@@ -265,8 +230,6 @@ export const updateEmployeeOrderStatus = async (req, res) => {
       update.status = "cancelled";
     }
 
-    // Atomic conditional update prevents concurrent requests
-    // from applying an invalid transition.
     const updatedOrder = await Order.findOneAndUpdate(
       {
         _id: orderId,
@@ -315,22 +278,6 @@ export const updateEmployeeOrderStatus = async (req, res) => {
   }
 };
 
-
-
-
-
-const isAllowed = (req, res) => {
-  if (!req.user || !allowedRoles.includes(req.user.role)) {
-    res.status(403).json({
-      success: false,
-      message: "You are not allowed to view employee reports",
-    });
-    return false;
-  }
-
-  return true;
-};
-
 const getEmployeeStats = async (employeeId) => {
   const [current, historical] = await Promise.all([
     Order.aggregate([
@@ -351,8 +298,7 @@ const getEmployeeStats = async (employeeId) => {
       { $unwind: "$deliveryHistory" },
       {
         $match: {
-          "deliveryHistory.employee":
-            new mongoose.Types.ObjectId(employeeId),
+          "deliveryHistory.employee": new mongoose.Types.ObjectId(employeeId),
           "deliveryHistory.action": {
             $in: ["assigned", "reassigned"],
           },
@@ -369,13 +315,8 @@ const getEmployeeStats = async (employeeId) => {
   );
 
   return {
-    // Historical assignment events; reassignment counts again.
     totalAssigned: historical[0]?.total || 0,
-
-    // Current workload by delivery status.
-    currentlyAssigned:
-      (counts.assigned || 0) + (counts.received || 0),
-
+    currentlyAssigned: (counts.assigned || 0) + (counts.received || 0),
     received: counts.received || 0,
     delivered: counts.delivered || 0,
     rejected: counts.rejected || 0,
@@ -386,8 +327,6 @@ const getEmployeeStats = async (employeeId) => {
 
 export const getEmployeeReportSummary = async (req, res) => {
   try {
-    if (!isAllowed(req, res)) return;
-
     const employees = await Customer.find({
       role: "employee",
     })
@@ -417,8 +356,6 @@ export const getEmployeeReportSummary = async (req, res) => {
 
 export const getEmployeeReportById = async (req, res) => {
   try {
-    if (!isAllowed(req, res)) return;
-
     const { employeeId } = req.params;
 
     if (!mongoose.isValidObjectId(employeeId)) {
@@ -460,8 +397,6 @@ export const getEmployeeReportById = async (req, res) => {
     });
   }
 };
-
-
 
 export const getEmployees = async (req, res) => {
   try {

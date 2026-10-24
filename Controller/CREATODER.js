@@ -1,4 +1,3 @@
-// Controller/MainOrderController.js
 
 import mongoose from "mongoose";
 import MainOrder from "../Model/MainOrder.js";
@@ -6,8 +5,14 @@ import Customer from "../Model/Customer.js";
 import Product from "../Model/Product.js";
 import { sendInvoiceEmail } from "../Service/sendInvoiceEmail.js";
 
+import {
+  getOrderListCache,
+  setOrderListCache,
+  clearOrderListCache,
+} from "../utils/orderCache.js";
+
 /* =========================================================
-   HELPER
+   HELPERS
 ========================================================= */
 
 const normalizeValue = (value) => {
@@ -32,16 +37,8 @@ const normalizeValue = (value) => {
   return String(value).trim();
 };
 
-/* =========================================================
-   GET VARIANT COLOR
-========================================================= */
-
 const getVariantColor = (variant) =>
   normalizeValue(variant?.color);
-
-/* =========================================================
-   GET VARIANT ID
-========================================================= */
 
 const getVariantId = (variant) => {
   if (!variant?._id) return null;
@@ -50,10 +47,6 @@ const getVariantId = (variant) => {
 
   return mongoose.Types.ObjectId.isValid(id) ? id : null;
 };
-
-/* =========================================================
-   FIND MATCHING VARIANT
-========================================================= */
 
 const findMatchingVariant = (product, selectedVariant = {}) => {
   if (!Array.isArray(product?.variants) || !product.variants.length) {
@@ -65,27 +58,23 @@ const findMatchingVariant = (product, selectedVariant = {}) => {
   const selectedStorage = normalizeValue(selectedVariant.storage);
 
   return (
-    product.variants.find((item) => {
+    product.variants.find((variant) => {
       const colorMatch =
         !selectedColor ||
-        getVariantColor(item) === selectedColor;
+        getVariantColor(variant) === selectedColor;
 
       const ramMatch =
         !selectedRam ||
-        normalizeValue(item?.ram) === selectedRam;
+        normalizeValue(variant.ram) === selectedRam;
 
       const storageMatch =
         !selectedStorage ||
-        normalizeValue(item?.storage) === selectedStorage;
+        normalizeValue(variant.storage) === selectedStorage;
 
       return colorMatch && ramMatch && storageMatch;
     }) || null
   );
 };
-
-/* =========================================================
-   GET COLOR IMAGE
-========================================================= */
 
 const getColorImage = (product, selectedColor) => {
   if (!Array.isArray(product?.colors) || !selectedColor) {
@@ -102,6 +91,7 @@ const getColorImage = (product, selectedColor) => {
 
 /* =========================================================
    CREATE ORDER
+   POST /api/orders
 ========================================================= */
 
 export const createOrder = async (req, res) => {
@@ -125,14 +115,17 @@ export const createOrder = async (req, res) => {
 
     /* BASIC VALIDATION */
 
-    if (!customerName?.trim()) {
+    if (
+      typeof customerName !== "string" ||
+      !customerName.trim()
+    ) {
       return res.status(400).json({
         success: false,
         message: "Customer name is required",
       });
     }
 
-    if (!phone?.trim()) {
+    if (typeof phone !== "string" || !phone.trim()) {
       return res.status(400).json({
         success: false,
         message: "Phone number is required",
@@ -146,7 +139,10 @@ export const createOrder = async (req, res) => {
       });
     }
 
-    if (!deliveryAddress?.trim()) {
+    if (
+      typeof deliveryAddress !== "string" ||
+      !deliveryAddress.trim()
+    ) {
       return res.status(400).json({
         success: false,
         message: "Delivery address is required",
@@ -160,17 +156,18 @@ export const createOrder = async (req, res) => {
       });
     }
 
-    if (termsAgreed !== true) {
+    if (termsAgreed !== true && termsAgreed !== "true") {
       return res.status(400).json({
         success: false,
         message: "Please agree to Terms and Conditions",
       });
     }
 
-    /* FIND / CREATE CUSTOMER */
-
     const cleanPhone = phone.trim();
-    const cleanEmail = email?.trim().toLowerCase() || "";
+    const cleanEmail =
+      typeof email === "string" ? email.trim().toLowerCase() : "";
+
+    /* FIND OR CREATE CUSTOMER */
 
     let customer = await Customer.findOne({
       phone: cleanPhone,
@@ -195,35 +192,27 @@ export const createOrder = async (req, res) => {
       await customer.save();
     }
 
-    /* PREPARE PRODUCTS */
+    /* PREPARE PRODUCTS AND STOCK UPDATES */
 
     const orderProducts = [];
     const stockUpdates = [];
 
     for (const item of products) {
-      /* PRODUCT ID */
-
       const productId =
         item.productId ||
         item.product ||
         item._id ||
         item.id;
 
-      if (!productId) {
+      if (
+        !productId ||
+        !mongoose.Types.ObjectId.isValid(String(productId))
+      ) {
         return res.status(400).json({
           success: false,
-          message: "Product ID is missing",
+          message: "Missing or invalid product ID",
         });
       }
-
-      if (!mongoose.Types.ObjectId.isValid(productId)) {
-        return res.status(400).json({
-          success: false,
-          message: `Invalid product ID: ${productId}`,
-        });
-      }
-
-      /* FIND PRODUCT */
 
       const product = await Product.findById(productId);
 
@@ -234,9 +223,7 @@ export const createOrder = async (req, res) => {
         });
       }
 
-      /* QUANTITY */
-
-      const quantity = Number(item.quantity || 1);
+      const quantity = Number(item.quantity ?? 1);
 
       if (!Number.isSafeInteger(quantity) || quantity < 1) {
         return res.status(400).json({
@@ -245,8 +232,6 @@ export const createOrder = async (req, res) => {
         });
       }
 
-      /* SELECTED VARIANT */
-
       const selectedVariant = item.variant || {
         color: item.color || "",
         ram: item.ram || "",
@@ -254,8 +239,6 @@ export const createOrder = async (req, res) => {
         variantId: item.variantId || null,
         sku: item.sku || "",
       };
-
-      /* FIND DATABASE VARIANT */
 
       let matchedVariant = null;
 
@@ -289,8 +272,6 @@ export const createOrder = async (req, res) => {
         }
       }
 
-      /* VARIANT VALUES */
-
       const color = matchedVariant
         ? getVariantColor(matchedVariant)
         : normalizeValue(selectedVariant.color || item.color);
@@ -303,24 +284,22 @@ export const createOrder = async (req, res) => {
         ? normalizeValue(matchedVariant.storage)
         : normalizeValue(selectedVariant.storage || item.storage);
 
-      /* STOCK CHECK */
-
       const currentStock = matchedVariant
-        ? Number(matchedVariant.stock || 0)
-        : Number(product.stock || 0);
+        ? Number(matchedVariant.stock ?? 0)
+        : Number(product.stock ?? 0);
 
-      if (currentStock < quantity) {
+      if (!Number.isFinite(currentStock) || currentStock < quantity) {
         return res.status(400).json({
           success: false,
-          message: `${product.name} has only ${currentStock} item(s) in stock`,
+          message: `${product.name} has only ${Math.max(0, currentStock || 0)} item(s) in stock`,
         });
       }
 
-      /* DATABASE PRICE */
-
-      const price = matchedVariant
-        ? Number(matchedVariant.price || 0)
-        : Number(product.discountPrice || product.price || 0);
+      const price = Number(
+        matchedVariant
+          ? matchedVariant.price
+          : product.discountPrice || product.price,
+      );
 
       if (!Number.isFinite(price) || price <= 0) {
         return res.status(400).json({
@@ -328,8 +307,6 @@ export const createOrder = async (req, res) => {
           message: `${product.name} has an invalid price`,
         });
       }
-
-      /* IMAGE */
 
       let image = "";
 
@@ -345,21 +322,13 @@ export const createOrder = async (req, res) => {
         image = product.images[0] || "";
       }
 
-      /* VARIANT ID */
-
       const variantId = matchedVariant
         ? getVariantId(matchedVariant)
         : null;
 
-      /* SKU */
-
       const sku = matchedVariant
         ? normalizeValue(matchedVariant.sku)
         : normalizeValue(selectedVariant.sku);
-
-      /* SUBTOTAL */
-
-      const itemSubtotal = price * quantity;
 
       orderProducts.push({
         product: product._id,
@@ -371,9 +340,9 @@ export const createOrder = async (req, res) => {
         storage,
         variantId,
         sku,
-        size: item.size || "",
+        size: normalizeValue(item.size),
         image,
-        subtotal: itemSubtotal,
+        subtotal: price * quantity,
       });
 
       stockUpdates.push({
@@ -388,14 +357,13 @@ export const createOrder = async (req, res) => {
     /* CALCULATE SUBTOTAL */
 
     const calculatedSubTotal = orderProducts.reduce(
-      (total, item) =>
-        total + Number(item.price) * Number(item.quantity),
+      (total, item) => total + item.price * item.quantity,
       0,
     );
 
     /* DELIVERY CHARGE */
 
-    const requestedDeliveryCharge = Number(deliveryCharge || 0);
+    const requestedDeliveryCharge = Number(deliveryCharge ?? 0);
 
     if (
       !Number.isFinite(requestedDeliveryCharge) ||
@@ -407,13 +375,14 @@ export const createOrder = async (req, res) => {
       });
     }
 
-    const safeDeliveryCharge = requestedDeliveryCharge;
-
     /* DISCOUNT */
 
-    const requestedDiscount = Number(discountAmount || 0);
+    const requestedDiscount = Number(discountAmount ?? 0);
 
-    if (!Number.isFinite(requestedDiscount) || requestedDiscount < 0) {
+    if (
+      !Number.isFinite(requestedDiscount) ||
+      requestedDiscount < 0
+    ) {
       return res.status(400).json({
         success: false,
         message: "Invalid discount amount",
@@ -425,12 +394,10 @@ export const createOrder = async (req, res) => {
       calculatedSubTotal,
     );
 
-    /* TOTAL */
-
     const calculatedTotalAmount = Math.max(
       0,
       calculatedSubTotal +
-        safeDeliveryCharge -
+        requestedDeliveryCharge -
         safeDiscountAmount,
     );
 
@@ -441,7 +408,7 @@ export const createOrder = async (req, res) => {
         stockItem.productId,
       );
 
-      const quantity = Number(stockItem.quantity);
+      const quantity = stockItem.quantity;
 
       if (stockItem.variantId) {
         const variantId = new mongoose.Types.ObjectId(
@@ -476,7 +443,7 @@ export const createOrder = async (req, res) => {
         );
 
         if (result.modifiedCount !== 1) {
-          return res.status(400).json({
+          return res.status(409).json({
             success: false,
             message: "Selected variant stock is no longer available",
           });
@@ -495,7 +462,7 @@ export const createOrder = async (req, res) => {
         );
 
         if (result.modifiedCount !== 1) {
-          return res.status(400).json({
+          return res.status(409).json({
             success: false,
             message: "Product stock is no longer available",
           });
@@ -515,12 +482,15 @@ export const createOrder = async (req, res) => {
       phone: cleanPhone,
       selectArea,
       deliveryAddress: deliveryAddress.trim(),
-      note: note?.trim() || "",
+      note: typeof note === "string" ? note.trim() : "",
       products: orderProducts,
       subTotal: calculatedSubTotal,
-      deliveryCharge: safeDeliveryCharge,
+      deliveryCharge: requestedDeliveryCharge,
       discountAmount: safeDiscountAmount,
-      couponCode: couponCode?.trim().toUpperCase() || "",
+      couponCode:
+        typeof couponCode === "string"
+          ? couponCode.trim().toUpperCase()
+          : "",
       totalAmount: calculatedTotalAmount,
       paymentMethod: paymentMethod || "cash_on_delivery",
       paymentStatus: "unpaid",
@@ -530,11 +500,10 @@ export const createOrder = async (req, res) => {
       source: orderSource || "website",
     });
 
-    /* =====================================================
-       SEND PDF INVOICE EMAIL
-       Order already exists. Email failure must not turn
-       a successful order into a failed checkout.
-    ===================================================== */
+    // Clear the cached order lists after successful order creation.
+    await clearOrderListCache();
+
+    /* SEND INVOICE EMAIL */
 
     let invoiceEmailSent = false;
 
@@ -555,14 +524,7 @@ export const createOrder = async (req, res) => {
           emailError.message,
         );
       }
-    } else {
-      console.log(
-        "Invoice email skipped: customer email is missing",
-        order.orderId,
-      );
     }
-
-    /* SUCCESS RESPONSE */
 
     return res.status(201).json({
       success: true,
@@ -589,26 +551,49 @@ export const createOrder = async (req, res) => {
 
 /* =========================================================
    GET ALL ORDERS
+   GET /api/orders?page=1&limit=20&status=pending
 ========================================================= */
 
 export const getAllOrders = async (req, res, next) => {
   try {
     const page = Math.max(1, Number(req.query.page) || 1);
+
     const limit = Math.min(
       100,
-      Math.max(1, Number(req.query.limit) || 20)
+      Math.max(1, Number(req.query.limit) || 20),
     );
+
+    const status =
+      typeof req.query.status === "string"
+        ? req.query.status
+        : "";
 
     const filter = {};
 
-    if (req.query.status) {
-      filter.status = req.query.status;
+    if (status) {
+      filter.status = status;
+    }
+
+    // Separate cache keys for pagination, filters and authenticated users.
+    const cacheKey = JSON.stringify({
+      page,
+      limit,
+      status,
+      userId: String(req.user?._id ?? req.user?.id ?? "shared"),
+      role: String(req.user?.role ?? "public"),
+    });
+
+    const cachedData = await getOrderListCache(cacheKey);
+
+    if (cachedData !== null) {
+      res.set("X-Cache", "HIT");
+      return res.status(200).json(cachedData);
     }
 
     const [orders, total] = await Promise.all([
       MainOrder.find(filter)
         .select(
-          "orderId customerName phone status source totalAmount createdAt"
+          "orderId customerName phone status source totalAmount createdAt",
         )
         .sort({ createdAt: -1, _id: -1 })
         .skip((page - 1) * limit)
@@ -618,7 +603,7 @@ export const getAllOrders = async (req, res, next) => {
       MainOrder.countDocuments(filter),
     ]);
 
-    return res.status(200).json({
+    const responseData = {
       success: true,
       data: {
         orders,
@@ -629,7 +614,13 @@ export const getAllOrders = async (req, res, next) => {
           totalPages: Math.ceil(total / limit),
         },
       },
-    });
+    };
+
+    await setOrderListCache(cacheKey, responseData);
+
+    res.set("X-Cache", "MISS");
+
+    return res.status(200).json(responseData);
   } catch (error) {
     next(error);
   }
@@ -637,6 +628,7 @@ export const getAllOrders = async (req, res, next) => {
 
 /* =========================================================
    GET SINGLE ORDER BY MONGODB ID
+   GET /api/orders/id/:id
 ========================================================= */
 
 export const getOrderById = async (req, res) => {
@@ -679,7 +671,8 @@ export const getOrderById = async (req, res) => {
 };
 
 /* =========================================================
-   GET ORDER BY ORDER ID
+   GET ORDER BY CUSTOM ORDER ID
+   GET /api/orders/order-id/:orderId
 ========================================================= */
 
 export const getOrderByOrderId = async (req, res) => {
@@ -742,6 +735,13 @@ export const updateOrderStatus = async (req, res) => {
       "cancelled",
     ];
 
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid order ID",
+      });
+    }
+
     if (!allowedStatuses.includes(status)) {
       return res.status(400).json({
         success: false,
@@ -764,6 +764,8 @@ export const updateOrderStatus = async (req, res) => {
         message: "Order not found",
       });
     }
+
+    await clearOrderListCache();
 
     return res.status(200).json({
       success: true,
@@ -795,6 +797,13 @@ export const updatePaymentStatus = async (req, res) => {
       "paid",
     ];
 
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid order ID",
+      });
+    }
+
     if (!allowedStatuses.includes(paymentStatus)) {
       return res.status(400).json({
         success: false,
@@ -818,6 +827,8 @@ export const updatePaymentStatus = async (req, res) => {
       });
     }
 
+    await clearOrderListCache();
+
     return res.status(200).json({
       success: true,
       message: "Payment status updated successfully",
@@ -833,23 +844,21 @@ export const updatePaymentStatus = async (req, res) => {
   }
 };
 
+/* =========================================================
+   GET ORDER DETAILS
+   GET /api/orders/:orderId
+========================================================= */
 
-
-
-
-// GET /api/orders/:orderId
 export const getOrderDetails = async (req, res, next) => {
   try {
     const { orderId } = req.params;
 
     let order = null;
 
-    // Search by MongoDB _id
     if (mongoose.Types.ObjectId.isValid(orderId)) {
       order = await MainOrder.findById(orderId).lean();
     }
 
-    // If not found, search by custom orderId
     if (!order) {
       order = await MainOrder.findOne({ orderId }).lean();
     }
@@ -870,21 +879,24 @@ export const getOrderDetails = async (req, res, next) => {
     next(error);
   }
 };
-// GET /api/orders/:orderId/navigation
+
+/* =========================================================
+   GET ORDER NAVIGATION
+   GET /api/orders/:orderId/navigation
+========================================================= */
+
 export const getOrderNavigation = async (req, res, next) => {
   try {
     const { orderId } = req.params;
 
     let currentOrder = null;
 
-    // MongoDB _id দিয়ে খোঁজা
     if (mongoose.Types.ObjectId.isValid(orderId)) {
       currentOrder = await MainOrder.findById(orderId)
         .select("_id orderId createdAt")
         .lean();
     }
 
-    // Custom orderId দিয়ে খোঁজা
     if (!currentOrder) {
       currentOrder = await MainOrder.findOne({ orderId })
         .select("_id orderId createdAt")
@@ -941,5 +953,3 @@ export const getOrderNavigation = async (req, res, next) => {
     next(error);
   }
 };
-// GET /api/orders
-// Order list for the All Orders page

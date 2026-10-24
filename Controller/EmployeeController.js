@@ -90,111 +90,71 @@ const addDeliveryHistory = (
 
 export const assignOrder = async (req, res) => {
   try {
-    const { orderId, employeeId, note = "" } = req.body || {};
+    const { orderId, employeeId } = req.body;
+
+    const assignedById = req.user?._id || req.user?.id;
 
     if (!orderId || !employeeId) {
       return res.status(400).json({
         success: false,
-        message: "orderId and employeeId are required",
+        message: "Order ID and employee ID are required",
       });
     }
 
-    if (!isValidId(employeeId)) {
+    if (!mongoose.isValidObjectId(orderId)) {
       return res.status(400).json({
         success: false,
-        message: "Invalid employeeId",
+        message: "Invalid order ID",
       });
     }
 
-    const employee = await Customer.findOne({
-      _id: employeeId,
-      role: "employee",
-      isActive: { $ne: false },
-    }).select("_id name email phone role isActive");
-
-    if (!employee) {
-      return res.status(404).json({
+    if (!mongoose.isValidObjectId(employeeId)) {
+      return res.status(400).json({
         success: false,
-        message: "Active employee not found",
+        message: "Invalid employee ID",
       });
     }
 
-    const receivedOrderId = normalizeText(orderId, 150);
-    const order = await findOrderByIdOrOrderNumber(receivedOrderId);
+    const order = await MainOrder.findByIdAndUpdate(
+      orderId,
+      {
+        $set: {
+          assignedEmployee: employeeId,
+          assignedBy: assignedById || null,
+          assignedAt: new Date(),
+          deliveryStatus: "assigned",
+        },
+        $push: {
+          deliveryHistory: {
+            status: "assigned",
+            note: "Order assigned to employee",
+            updatedBy: assignedById || null,
+            updatedAt: new Date(),
+          },
+        },
+      },
+      {
+        new: true,
+        runValidators: true,
+      },
+    )
+      .populate("assignedEmployee", "name fullName username email")
+      .populate("assignedBy", "name fullName username email");
 
     if (!order) {
-      console.error("Order not found:", {
-        receivedOrderId,
-        database: MainOrder.db.name,
-        collection: MainOrder.collection.name,
-      });
-
       return res.status(404).json({
         success: false,
-        message: `Order not found with ID: ${receivedOrderId}`,
+        message: "Order not found",
       });
     }
-
-    if (
-      ["delivered", "cancelled"].includes(order.status) ||
-      ["delivered", "cancelled", "returned"].includes(
-        order.deliveryStatus,
-      )
-    ) {
-      return res.status(409).json({
-        success: false,
-        message: "Completed or cancelled orders cannot be assigned",
-      });
-    }
-
-    const actorId = getValidActorId(req);
-    const previousEmployeeId = order.assignedEmployee
-      ? String(order.assignedEmployee._id || order.assignedEmployee)
-      : null;
-
-    const isReassignment =
-      Boolean(previousEmployeeId) &&
-      previousEmployeeId !== String(employee._id);
-
-    const now = new Date();
-
-    order.assignedEmployee = employee._id;
-    order.assignedBy = actorId;
-    order.assignedAt = now;
-    order.deliveryStatus = "assigned";
-    order.deliveryNote = normalizeText(note);
-
-    // Match the deliveryHistory schema:
-    // status, note, updatedBy, updatedAt
-    addDeliveryHistory(
-      order,
-      "assigned",
-      isReassignment
-        ? `Reassigned to ${employee.name}. ${normalizeText(note)}`
-        : normalizeText(note),
-      actorId,
-    );
-
-    await order.save();
-    await populateOrder(order);
 
     return res.status(200).json({
       success: true,
-      message: isReassignment
-        ? "Order reassigned successfully"
-        : "Order assigned successfully",
+      message: "Order assigned successfully",
       data: order,
     });
   } catch (error) {
     console.error("assignOrder error:", error);
-
-    if (error.name === "ValidationError") {
-      return res.status(400).json({
-        success: false,
-        message: "Order validation failed",
-        error: error.message,
-      });
-    }
 
     return res.status(500).json({
       success: false,

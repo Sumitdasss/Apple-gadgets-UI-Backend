@@ -345,6 +345,7 @@ const orderSchema = new mongoose.Schema(
 // =========================
 orderSchema.index({ createdAt: -1 });
 orderSchema.index({ assignedEmployee: 1, deliveryStatus: 1 });
+orderSchema.index({ assignedBy: 1 });
 orderSchema.index({ status: 1 });
 
 // =========================

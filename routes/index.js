@@ -181,7 +181,7 @@ router.patch(
   updateEmployeeOrderStatus
 );
 
-router.get("/summary",  getEmployeeReportSummary);
+router.get("/employee-summary",  getEmployeeReportSummary);
 router.get("/getEmployees",  getEmployees);
 router.get("/getEmployeeReportById/:employeeId", getEmployeeReportById);
 

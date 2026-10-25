@@ -183,7 +183,7 @@ router.patch(
 
 router.get("/summary",  getEmployeeReportSummary);
 router.get("/getEmployees",  getEmployees);
-router.get("getEmployeeReportById/:employeeId", getEmployeeReportById);
+router.get("/getEmployeeReportById/:employeeId", getEmployeeReportById);
 
 
 

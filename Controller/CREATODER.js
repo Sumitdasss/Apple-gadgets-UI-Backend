@@ -645,9 +645,9 @@ export const getOrderById = async (req, res) => {
     const order = await MainOrder.findById(id)
       .populate("customer", "name email phone address")
       .populate(
-        "products.product",
-        "name price discountPrice stock images colors variants",
-      );
+  "products.product",
+  "name price discountPrice costPrice stock images colors variants",
+);
 
     if (!order) {
       return res.status(404).json({

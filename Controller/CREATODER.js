@@ -335,6 +335,7 @@ export const createOrder = async (req, res) => {
         name: product.name,
         price,
         quantity,
+         costPrice: Number(product.costPrice ?? 0),
         color,
         ram,
         storage,

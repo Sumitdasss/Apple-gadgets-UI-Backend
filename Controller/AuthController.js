@@ -140,9 +140,15 @@ export const register = asyncHandler(async (req, res) => {
 // VERIFY REGISTRATION EMAIL OTP
 // =====================================================
 
+
+// =====================================================
+// VERIFY REGISTRATION EMAIL OTP AND AUTO LOGIN
+// =====================================================
+
 export const verifyEmailOtp = asyncHandler(async (req, res) => {
   const { email, otp } = req.body;
 
+  // Validate input
   if (
     typeof email !== "string" ||
     typeof otp !== "string" ||
@@ -156,6 +162,7 @@ export const verifyEmailOtp = asyncHandler(async (req, res) => {
     return apiResponse(res, 400, "OTP must contain 6 digits");
   }
 
+  // Find customer
   const customer = await Customer.findOne({
     email: normalizeEmail(email),
   }).select("+emailOtpHash +emailOtpExpires");
@@ -165,9 +172,10 @@ export const verifyEmailOtp = asyncHandler(async (req, res) => {
   }
 
   if (customer.isEmailVerified) {
-    return apiResponse(res, 200, "Email already verified");
+    return apiResponse(res, 400, "Email already verified. Please log in.");
   }
 
+  // Check OTP expiry
   if (
     !customer.emailOtpHash ||
     !customer.emailOtpExpires ||
@@ -180,6 +188,7 @@ export const verifyEmailOtp = asyncHandler(async (req, res) => {
     );
   }
 
+  // Verify OTP
   const isCorrect = await bcrypt.compare(
     otp.trim(),
     customer.emailOtpHash
@@ -189,14 +198,40 @@ export const verifyEmailOtp = asyncHandler(async (req, res) => {
     return apiResponse(res, 400, "Invalid OTP");
   }
 
+  // Ensure JWT secret exists
+  if (!process.env.JWT_ACCESS_SECRET) {
+    throw new Error("JWT_ACCESS_SECRET is missing");
+  }
+
+  // Mark email as verified
   customer.isEmailVerified = true;
   customer.emailOtpHash = undefined;
   customer.emailOtpExpires = undefined;
 
   await customer.save();
 
-  return apiResponse(res, 200, "Email verified successfully");
+  // Generate JWT token for automatic login
+  const token = jwt.sign(
+    {
+      id: customer._id.toString(),
+      role: customer.role,
+    },
+    process.env.JWT_ACCESS_SECRET,
+    { expiresIn: "7d" }
+  );
+
+  // Return token and safe user data
+  return apiResponse(
+    res,
+    200,
+    "Email verified successfully. You are now logged in.",
+    {
+      user: sanitizeCustomer(customer),
+      token,
+    }
+  );
 });
+
 
 // =====================================================
 // RESEND REGISTRATION OTP

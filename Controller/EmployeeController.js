@@ -367,60 +367,75 @@ export const updateEmployeeOrderStatus = async (req, res) => {
    EMPLOYEE STATISTICS
 ===================================================== */
 
+/* =====================================================
+   EMPLOYEE STATISTICS - FIXED
+===================================================== */
+
 const getEmployeeStats = async (employeeId) => {
   const employeeObjectId = new mongoose.Types.ObjectId(
     String(employeeId),
   );
 
-  const [current, assignmentHistory] = await Promise.all([
-    MainOrder.aggregate([
-      {
-        $match: {
-          assignedEmployee: employeeObjectId,
+  // Employee-কে বর্তমানে যেসব order assign করা আছে,
+  // সেগুলোর সব delivery status-এর হিসাব নেওয়া হচ্ছে।
+  const result = await MainOrder.aggregate([
+    {
+      $match: {
+        assignedEmployee: employeeObjectId,
+      },
+    },
+    {
+      $group: {
+        _id: {
+          $ifNull: ["$deliveryStatus", "unassigned"],
+        },
+        count: {
+          $sum: 1,
         },
       },
-      {
-        $group: {
-          _id: {
-            $ifNull: ["$deliveryStatus", "unassigned"],
-          },
-          count: { $sum: 1 },
-        },
-      },
-    ]),
-
-    MainOrder.aggregate([
-      { $unwind: "$deliveryHistory" },
-      {
-        $match: {
-          "deliveryHistory.status": "assigned",
-          "deliveryHistory.updatedBy": employeeObjectId,
-        },
-      },
-      { $group: { _id: "$_id" } },
-      { $count: "total" },
-    ]),
+    },
   ]);
 
   const counts = Object.fromEntries(
-    current.map((item) => [item._id, item.count]),
+    result.map((item) => [item._id, item.count]),
   );
 
   const assigned = counts.assigned || 0;
   const pickedUp = counts.picked_up || 0;
   const inTransit = counts.in_transit || 0;
+  const delivered = counts.delivered || 0;
+  const failed = counts.failed || 0;
+  const returned = counts.returned || 0;
+  const cancelled = counts.cancelled || 0;
+
+  // Employee-কে বর্তমানে assign করা order-গুলোর
+  // মোট সংখ্যা, delivery status নির্বিশেষে।
+  const totalAssigned =
+    assigned +
+    pickedUp +
+    inTransit +
+    delivered +
+    failed +
+    returned +
+    cancelled;
+
+ 
+  const currentlyAssigned =
+    assigned +
+    pickedUp +
+    inTransit;
 
   return {
-    totalAssigned: assignmentHistory[0]?.total || 0,
-    currentlyAssigned: assigned + pickedUp + inTransit,
+    totalAssigned,
+    currentlyAssigned,
     assigned,
     pickedUp,
     inTransit,
-    delivered: counts.delivered || 0,
-    failed: counts.failed || 0,
-    returned: counts.returned || 0,
-    cancelled: counts.cancelled || 0,
-    pending: assigned + pickedUp + inTransit,
+    delivered,
+    failed,
+    returned,
+    cancelled,
+    pending: currentlyAssigned,
   };
 };
 

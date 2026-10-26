@@ -593,9 +593,9 @@ export const getAllOrders = async (req, res, next) => {
 
     const [orders, total] = await Promise.all([
       MainOrder.find(filter)
-        .select(
-          "orderId customerName phone status source totalAmount createdAt",
-        )
+       .select(
+  "orderId customerName phone status source totalAmount subTotal deliveryCharge discountAmount products createdAt",
+)
         .sort({ createdAt: -1, _id: -1 })
         .skip((page - 1) * limit)
         .limit(limit)

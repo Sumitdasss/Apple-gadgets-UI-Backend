@@ -644,6 +644,59 @@ const saveProduct = async (req, res, isUpdate = false) => {
   }
 };
 
+
+/* =====================================================
+   16. GET PRODUCT COSTS FOR PROFIT REPORT
+===================================================== */
+
+export const getProductCostsForReport = async (req, res) => {
+  try {
+    const products = await Product.find({})
+      .select("_id name sku costPrice variants")
+      .lean();
+
+    const result = products.map((product) => ({
+      _id: String(product._id),
+      name: product.name || "",
+      sku: product.sku || "",
+      costPrice:
+        Number.isFinite(Number(product.costPrice)) &&
+        product.costPrice !== null &&
+        product.costPrice !== ""
+          ? Number(product.costPrice)
+          : null,
+      variants: (product.variants || []).map((variant) => ({
+        _id: variant._id ? String(variant._id) : "",
+        sku: variant.sku || "",
+        ram: variant.ram || "",
+        storage: variant.storage || "",
+        costPrice:
+          variant.costPrice !== undefined &&
+          variant.costPrice !== null &&
+          variant.costPrice !== "" &&
+          Number.isFinite(Number(variant.costPrice))
+            ? Number(variant.costPrice)
+            : null,
+      })),
+    }));
+
+    return res.status(200).json({
+      success: true,
+      count: result.length,
+      products: result,
+    });
+  } catch (error) {
+    console.error("GET PRODUCT COSTS FOR REPORT ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch product costs for report",
+    });
+  }
+};
+
+
+
 export const addProduct = (req, res) =>
   saveProduct(req, res, false);
 

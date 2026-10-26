@@ -11,7 +11,8 @@ import {
   getReviewSummary,
   getProductReviews,
   createReview,
-  getDesktopProducts
+  getDesktopProducts,
+  getProductCostsForReport
 } from "../Controller/addproduct.js";
 import {
   receiveWebhook,
@@ -173,7 +174,10 @@ router.get(
   authorizeRoles("employee"),
   getMyOrders
 );
-
+router.get(
+  "/product-costs-report",
+  getProductCostsForReport
+);
 router.patch(
   "/:orderId/status",
   verifyToken,

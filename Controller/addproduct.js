@@ -327,6 +327,7 @@ const saveProduct = async (req, res, isUpdate = false) => {
 
     const price = parseNumber(getValue("price"), "price");
     const stock = parseNumber(getValue("stock"), "stock");
+    const costPrice = parseNumber(getValue("costPrice"), "costPrice");
 
     const rawDiscountPrice = getValue("discountPrice", null);
 
@@ -538,6 +539,7 @@ const saveProduct = async (req, res, isUpdate = false) => {
       discountPrice,
       discountPercentage,
       stock,
+      costPrice,
       sku: cleanString(getValue("sku")),
       colors,
       sizes: uniqueStrings(sizesInput),

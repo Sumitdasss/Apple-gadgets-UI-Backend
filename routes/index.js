@@ -37,6 +37,7 @@ import { verifyToken } from "../Middleware/authMiddleware.js";
 import { authorizeRoles } from "../Middleware/roleMiddleware.js";
 import { createLandingPage, deleteLandingPage, getLandingPageById, getLandingPages, getPublishedLandingPage, getPublishedLandingPageBanners, getPublishedOffers, setLandingPageStatus, updateLandingPage } from "../Controller/LandingPageController.js";
 import { assignOrder, getEmployeeReportById, getEmployeeReportSummary, getEmployees, getMyOrders, reassignOrder, updateEmployeeOrderStatus } from "../Controller/EmployeeController.js";
+import { initiateSSLCommerzPayment, sslcommerzCancel, sslcommerzFail, sslcommerzIPN, sslcommerzSuccess } from "../Controller/sslcommerzController.js";
 const router = express.Router();
 
 router.post(
@@ -184,6 +185,26 @@ router.patch(
   authorizeRoles("employee"),
   updateEmployeeOrderStatus
 );
+
+
+router.post("/initiate",  initiateSSLCommerzPayment);
+
+// SSLCOMMERZ callbacks: public routes, server-side validation required
+router.get("/successGet", sslcommerzSuccess);
+router.post("/successPost", sslcommerzSuccess);
+
+router.get("/failGet", sslcommerzFail);
+router.post("/failPost", sslcommerzFail);
+
+router.get("/cancelGet", sslcommerzCancel);
+router.post("/cancelPost", sslcommerzCancel);
+
+router.get("/ipnGet", sslcommerzIPN);
+router.post("/ipnPost", sslcommerzIPN);
+
+
+
+
 
 router.get("/employee-summary",  getEmployeeReportSummary);
 router.get("/getEmployees",  getEmployees);

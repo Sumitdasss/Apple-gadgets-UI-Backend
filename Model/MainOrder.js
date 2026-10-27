@@ -191,12 +191,46 @@ const orderSchema = new mongoose.Schema(
       default: "cash_on_delivery",
     },
 
-    paymentStatus: {
-      type: String,
-      enum: ["unpaid", "partially_paid", "paid"],
-      default: "unpaid",
-    },
+  paymentStatus: {
+  type: String,
+  enum: [
+    "unpaid",
+    "pending",
+    "partially_paid",
+    "paid",
+    "failed",
+    "cancelled",
+    "review",
+  ],
+  default: "unpaid",
+},
+// SSLCOMMERZ PAYMENT DETAILS
 
+paymentAmount: {
+  type: Number,
+  default: 0,
+  min: 0,
+},
+
+paymentCurrency: {
+  type: String,
+  default: "BDT",
+},
+
+sslcommerzTranId: {
+  type: String,
+  default: null,
+},
+
+sslcommerzValidationId: {
+  type: String,
+  default: null,
+},
+
+bankTransactionId: {
+  type: String,
+  default: null,
+},
     // =========================
     // DELIVERY METHOD
     // =========================

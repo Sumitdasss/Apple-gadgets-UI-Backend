@@ -187,20 +187,20 @@ router.patch(
 );
 
 
-router.post("/initiate",  initiateSSLCommerzPayment);
+// router.post("/initiate",  initiateSSLCommerzPayment);
 
-// SSLCOMMERZ callbacks: public routes, server-side validation required
-router.get("/successGet", sslcommerzSuccess);
-router.post("/successPost", sslcommerzSuccess);
+// // SSLCOMMERZ callbacks: public routes, server-side validation required
+// router.get("/successGet", sslcommerzSuccess);
+// router.post("/successPost", sslcommerzSuccess);
 
-router.get("/failGet", sslcommerzFail);
-router.post("/failPost", sslcommerzFail);
+// router.get("/failGet", sslcommerzFail);
+// router.post("/failPost", sslcommerzFail);
 
-router.get("/cancelGet", sslcommerzCancel);
-router.post("/cancelPost", sslcommerzCancel);
+// router.get("/cancelGet", sslcommerzCancel);
+// router.post("/cancelPost", sslcommerzCancel);
 
-router.get("/ipnGet", sslcommerzIPN);
-router.post("/ipnPost", sslcommerzIPN);
+// router.get("/ipnGet", sslcommerzIPN);
+// router.post("/ipnPost", sslcommerzIPN);
 
 
 

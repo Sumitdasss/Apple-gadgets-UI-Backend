@@ -7,7 +7,7 @@ import  {connectDB}  from "./config/db.js";
 import router from "./routes/index.js";
 import { apiResponse } from "./utils/ApiResponse.js";
 import cookieParser from "cookie-parser";
-import { startOtpCleanup } from "./Controller/AuthController.js";
+
 
 DNS.setServers(["1.1.1.1", "8.8.8.8"]);
 
@@ -15,7 +15,7 @@ const app = express();
 
 // ================= DATABASE =================
 connectDB();
-startOtpCleanup()
+
 
 // ================= CORS =================
 app.use(

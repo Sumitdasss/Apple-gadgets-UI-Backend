@@ -145,10 +145,13 @@ export const register = asyncHandler(async (req, res) => {
 // VERIFY REGISTRATION EMAIL OTP AND AUTO LOGIN
 // =====================================================
 
+
 export const verifyEmailOtp = asyncHandler(async (req, res) => {
   const { email, otp } = req.body;
 
-  // Validate input
+  // =========================
+  // 1. Validate input
+  // =========================
   if (
     typeof email !== "string" ||
     typeof otp !== "string" ||
@@ -158,11 +161,15 @@ export const verifyEmailOtp = asyncHandler(async (req, res) => {
     return apiResponse(res, 400, "Email and OTP are required");
   }
 
-  if (!/^\d{6}$/.test(otp.trim())) {
+  const normalizedOtp = otp.trim();
+
+  if (!/^\d{6}$/.test(normalizedOtp)) {
     return apiResponse(res, 400, "OTP must contain 6 digits");
   }
 
-  // Find customer
+  // =========================
+  // 2. Find customer
+  // =========================
   const customer = await Customer.findOne({
     email: normalizeEmail(email),
   }).select("+emailOtpHash +emailOtpExpires");
@@ -171,16 +178,40 @@ export const verifyEmailOtp = asyncHandler(async (req, res) => {
     return apiResponse(res, 404, "Account not found");
   }
 
+  // =========================
+  // 3. Check email verification
+  // =========================
   if (customer.isEmailVerified) {
-    return apiResponse(res, 400, "Email already verified. Please log in.");
+    return apiResponse(
+      res,
+      400,
+      "Email already verified. Please log in."
+    );
   }
 
-  // Check OTP expiry
-  if (
-    !customer.emailOtpHash ||
-    !customer.emailOtpExpires ||
-    new Date(customer.emailOtpExpires).getTime() <= Date.now()
-  ) {
+  // =========================
+  // 4. Check OTP availability
+  // =========================
+  if (!customer.emailOtpHash || !customer.emailOtpExpires) {
+    return apiResponse(
+      res,
+      400,
+      "OTP not found. Please request a new OTP."
+    );
+  }
+
+  // =========================
+  // 5. Check OTP expiry
+  // =========================
+  const expiryTime = new Date(customer.emailOtpExpires).getTime();
+
+  if (Number.isNaN(expiryTime) || expiryTime <= Date.now()) {
+    // Clear expired OTP fields in MongoDB
+    customer.emailOtpHash = null;
+    customer.emailOtpExpires = null;
+
+    await customer.save();
+
     return apiResponse(
       res,
       400,
@@ -188,9 +219,11 @@ export const verifyEmailOtp = asyncHandler(async (req, res) => {
     );
   }
 
-  // Verify OTP
+  // =========================
+  // 6. Verify OTP
+  // =========================
   const isCorrect = await bcrypt.compare(
-    otp.trim(),
+    normalizedOtp,
     customer.emailOtpHash
   );
 
@@ -198,29 +231,39 @@ export const verifyEmailOtp = asyncHandler(async (req, res) => {
     return apiResponse(res, 400, "Invalid OTP");
   }
 
-  // Ensure JWT secret exists
+  // =========================
+  // 7. Check JWT secret
+  // =========================
   if (!process.env.JWT_ACCESS_SECRET) {
     throw new Error("JWT_ACCESS_SECRET is missing");
   }
 
-  // Mark email as verified
+  // =========================
+  // 8. Mark email as verified
+  // =========================
   customer.isEmailVerified = true;
-  customer.emailOtpHash = undefined;
-  customer.emailOtpExpires = undefined;
+  customer.emailOtpHash = null;
+  customer.emailOtpExpires = null;
 
   await customer.save();
 
-  // Generate JWT token for automatic login
+  // =========================
+  // 9. Generate JWT token
+  // =========================
   const token = jwt.sign(
     {
       id: customer._id.toString(),
       role: customer.role,
     },
     process.env.JWT_ACCESS_SECRET,
-    { expiresIn: "7d" }
+    {
+      expiresIn: "7d",
+    }
   );
 
-  // Return token and safe user data
+  // =========================
+  // 10. Return response
+  // =========================
   return apiResponse(
     res,
     200,
@@ -233,29 +276,62 @@ export const verifyEmailOtp = asyncHandler(async (req, res) => {
 });
 
 
+
 // =====================================================
 // RESEND REGISTRATION OTP
 // =====================================================
 
+
 export const resendEmailOtp = asyncHandler(async (req, res) => {
   const { email } = req.body;
 
+  // =========================
+  // 1. Validate email
+  // =========================
   if (typeof email !== "string" || !email.trim()) {
     return apiResponse(res, 400, "Email is required");
   }
 
+  // =========================
+  // 2. Find customer
+  // =========================
   const customer = await Customer.findOne({
     email: normalizeEmail(email),
-  });
+  }).select("+emailOtpHash +emailOtpExpires");
 
   if (!customer) {
     return apiResponse(res, 404, "Account not found");
   }
 
+  // =========================
+  // 3. Check email verification
+  // =========================
   if (customer.isEmailVerified) {
     return apiResponse(res, 400, "Email already verified");
   }
 
+  // =========================
+  // 4. Clear expired OTP
+  // =========================
+  const expiryTime = customer.emailOtpExpires
+    ? new Date(customer.emailOtpExpires).getTime()
+    : null;
+
+  if (
+    customer.emailOtpExpires &&
+    (expiryTime === null ||
+      Number.isNaN(expiryTime) ||
+      expiryTime <= Date.now())
+  ) {
+    customer.emailOtpHash = null;
+    customer.emailOtpExpires = null;
+
+    await customer.save();
+  }
+
+  // =========================
+  // 5. Generate new OTP
+  // =========================
   const otp = generateOtp();
 
   customer.emailOtpHash = await bcrypt.hash(otp, 10);
@@ -263,8 +339,10 @@ export const resendEmailOtp = asyncHandler(async (req, res) => {
 
   await customer.save();
 
+  // =========================
+  // 6. Send OTP email
+  // =========================
   try {
-    // Keep the same argument order as registration.
     await sendOtpEmail(
       customer.email,
       otp,
@@ -274,14 +352,22 @@ export const resendEmailOtp = asyncHandler(async (req, res) => {
   } catch (error) {
     console.error("Resend email OTP failed:", error);
 
-    customer.emailOtpHash = undefined;
-    customer.emailOtpExpires = undefined;
+    // Clear OTP if email sending fails
+    customer.emailOtpHash = null;
+    customer.emailOtpExpires = null;
 
     await customer.save();
 
-    return apiResponse(res, 502, "Could not send OTP email");
+    return apiResponse(
+      res,
+      502,
+      "Could not send OTP email. Please try again."
+    );
   }
 
+  // =========================
+  // 7. Success response
+  // =========================
   return apiResponse(
     res,
     200,
@@ -380,9 +466,13 @@ export const login = asyncHandler(async (req, res) => {
 // VERIFY LOGIN OTP AND ISSUE JWT
 // =====================================================
 
+
 export const verifyLoginOtp = asyncHandler(async (req, res) => {
   const { email, otp } = req.body;
 
+  // =========================
+  // 1. Validate input
+  // =========================
   if (
     typeof email !== "string" ||
     typeof otp !== "string" ||
@@ -392,10 +482,15 @@ export const verifyLoginOtp = asyncHandler(async (req, res) => {
     return apiResponse(res, 400, "Email and OTP are required");
   }
 
-  if (!/^\d{6}$/.test(otp.trim())) {
+  const normalizedOtp = otp.trim();
+
+  if (!/^\d{6}$/.test(normalizedOtp)) {
     return apiResponse(res, 400, "OTP must contain 6 digits");
   }
 
+  // =========================
+  // 2. Find customer
+  // =========================
   const customer = await Customer.findOne({
     email: normalizeEmail(email),
   }).select(
@@ -406,6 +501,9 @@ export const verifyLoginOtp = asyncHandler(async (req, res) => {
     return apiResponse(res, 404, "Account not found");
   }
 
+  // =========================
+  // 3. Check account status
+  // =========================
   if (
     customer.isActive === false ||
     !customer.isEmailVerified
@@ -417,11 +515,30 @@ export const verifyLoginOtp = asyncHandler(async (req, res) => {
     );
   }
 
-  if (
-    !customer.loginOtpHash ||
-    !customer.loginOtpExpires ||
-    new Date(customer.loginOtpExpires).getTime() <= Date.now()
-  ) {
+  // =========================
+  // 4. Check OTP availability
+  // =========================
+  if (!customer.loginOtpHash || !customer.loginOtpExpires) {
+    return apiResponse(
+      res,
+      400,
+      "Login OTP not found. Please log in again."
+    );
+  }
+
+  // =========================
+  // 5. Check OTP expiry
+  // =========================
+  const expiryTime = new Date(customer.loginOtpExpires).getTime();
+
+  if (Number.isNaN(expiryTime) || expiryTime <= Date.now()) {
+    // Clear expired login OTP fields
+    customer.loginOtpHash = null;
+    customer.loginOtpExpires = null;
+    customer.loginOtpAttempts = 0;
+
+    await customer.save();
+
     return apiResponse(
       res,
       400,
@@ -429,11 +546,14 @@ export const verifyLoginOtp = asyncHandler(async (req, res) => {
     );
   }
 
+  // =========================
+  // 6. Check maximum attempts
+  // =========================
   if (
     (customer.loginOtpAttempts || 0) >= MAX_LOGIN_OTP_ATTEMPTS
   ) {
-    customer.loginOtpHash = undefined;
-    customer.loginOtpExpires = undefined;
+    customer.loginOtpHash = null;
+    customer.loginOtpExpires = null;
     customer.loginOtpAttempts = 0;
 
     await customer.save();
@@ -445,8 +565,11 @@ export const verifyLoginOtp = asyncHandler(async (req, res) => {
     );
   }
 
+  // =========================
+  // 7. Verify OTP
+  // =========================
   const isCorrect = await bcrypt.compare(
-    otp.trim(),
+    normalizedOtp,
     customer.loginOtpHash
   );
 
@@ -454,35 +577,70 @@ export const verifyLoginOtp = asyncHandler(async (req, res) => {
     customer.loginOtpAttempts =
       (customer.loginOtpAttempts || 0) + 1;
 
+    // Clear OTP when maximum attempts are reached
+    if (
+      customer.loginOtpAttempts >= MAX_LOGIN_OTP_ATTEMPTS
+    ) {
+      customer.loginOtpHash = null;
+      customer.loginOtpExpires = null;
+      customer.loginOtpAttempts = 0;
+
+      await customer.save();
+
+      return apiResponse(
+        res,
+        429,
+        "Too many incorrect OTP attempts. Please log in again."
+      );
+    }
+
     await customer.save();
 
     return apiResponse(res, 400, "Invalid OTP");
   }
 
+  // =========================
+  // 8. Check JWT secret
+  // =========================
   if (!process.env.JWT_ACCESS_SECRET) {
     throw new Error("JWT_ACCESS_SECRET is missing");
   }
 
+  // =========================
+  // 9. Generate JWT token
+  // =========================
   const token = jwt.sign(
     {
       id: customer._id.toString(),
       role: customer.role,
     },
     process.env.JWT_ACCESS_SECRET,
-    { expiresIn: "7d" }
+    {
+      expiresIn: "7d",
+    }
   );
 
-  // Clear OTP so it cannot be reused.
-  customer.loginOtpHash = undefined;
-  customer.loginOtpExpires = undefined;
+  // =========================
+  // 10. Clear OTP after success
+  // =========================
+  customer.loginOtpHash = null;
+  customer.loginOtpExpires = null;
   customer.loginOtpAttempts = 0;
 
   await customer.save();
 
-  return apiResponse(res, 200, "Login successful", {
-    user: sanitizeCustomer(customer),
-    token,
-  });
+  // =========================
+  // 11. Return response
+  // =========================
+  return apiResponse(
+    res,
+    200,
+    "Login successful",
+    {
+      user: sanitizeCustomer(customer),
+      token,
+    }
+  );
 });
 
 // =====================================================

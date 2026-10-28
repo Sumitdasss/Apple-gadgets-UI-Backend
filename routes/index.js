@@ -213,6 +213,42 @@ router.patch(
   assignCourierRider
 );
 
+
+
+
+app.get("/api/cron/cleanup-expired-otps", async (req, res) => {
+  try {
+
+    if (
+      !process.env.CRON_SECRET ||
+      req.headers.authorization !==
+        `Bearer ${process.env.CRON_SECRET}`
+    ) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized",
+      });
+    }
+
+
+    const cleaned = await startOtpCleanup();
+
+    return res.status(200).json({
+      success: true,
+      message: "Expired registration OTP cleanup completed",
+      cleaned,
+    });
+  } catch (error) {
+    console.error("OTP cleanup route error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "OTP cleanup failed",
+    });
+  }
+});
+
+
 router.post("/initiate", verifyToken, initiateSSLCommerzPayment);
 
 

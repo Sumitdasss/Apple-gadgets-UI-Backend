@@ -1,11 +1,6 @@
 {
 
-"crons": [
-    {
-      "path": "/api/cron/cleanup-expired-otps",
-      "schedule": "*/5 * * * *"
-    }
-  ],
+
 
 
   "$schema": "https://openapi.vercel.sh/vercel.json",

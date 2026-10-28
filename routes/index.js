@@ -157,6 +157,42 @@ router.post(
   createLandingPage,
 );
 
+
+
+
+router.get("/cleanup-expired-otps", async (req, res) => {
+  try {
+    // Verify cron secret
+    if (
+      !process.env.SECRET ||
+      req.headers.authorization !== `Bearer ${process.env.SECRET}`
+    ) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized",
+      });
+    }
+
+    const result = await startOtpCleanup();
+
+    return res.status(200).json({
+      success: true,
+      message: "Expired OTP cleanup completed successfully",
+      data: result,
+    });
+  } catch (error) {
+    console.error("OTP cleanup error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to clean expired OTPs",
+    });
+  }
+});
+
+
+
+
 router.get("/getLandingPage/:id",  getLandingPageById);
 
 router.put("/updateLandingPage/:id",  updateLandingPage);
@@ -217,35 +253,7 @@ router.patch(
 
 
 
-router.get("/api/cron/cleanup-expired-otps", async (req, res) => {
-  try {
-    if (
-      !process.env.CRON_SECRET ||
-      req.headers.authorization !==
-        `Bearer ${process.env.CRON_SECRET}`
-    ) {
-      return res.status(401).json({
-        success: false,
-        message: "Unauthorized",
-      });
-    }
 
-    const result = await startOtpCleanup();
-
-    return res.status(200).json({
-      success: true,
-      message: "Expired OTP cleanup completed",
-      ...result,
-    });
-  } catch (error) {
-    console.error("OTP cleanup route error:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: "OTP cleanup failed",
-    });
-  }
-});
 
 
 router.post("/initiate", verifyToken, initiateSSLCommerzPayment);

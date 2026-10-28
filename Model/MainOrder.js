@@ -220,13 +220,11 @@ const orderSchema = new mongoose.Schema(
       default: "BDT",
     },
 
-    sslcommerzTranId: {
-      type: String,
-      default: null,
-      index: true,
-    },
+sslcommerzTranId: {
+  type: String,
+  default: null,
+},
 
-    // এই field-টা আগে মিসিং ছিল → expected=NaN এর কারণ
     sslcommerzExpectedAmount: {
       type: Number,
       default: null,

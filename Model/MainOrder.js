@@ -1,4 +1,3 @@
-
 import mongoose from "mongoose";
 
 const orderSchema = new mongoose.Schema(
@@ -81,12 +80,14 @@ const orderSchema = new mongoose.Schema(
           required: true,
           min: 0,
         },
-    costPrice: {
-  type: Number,
-  required: false,
-  default: 0,
-  min: 0,
-},
+
+        costPrice: {
+          type: Number,
+          required: false,
+          default: 0,
+          min: 0,
+        },
+
         quantity: {
           type: Number,
           required: true,
@@ -191,46 +192,57 @@ const orderSchema = new mongoose.Schema(
       default: "cash_on_delivery",
     },
 
-  paymentStatus: {
-  type: String,
-  enum: [
-    "unpaid",
-    "pending",
-    "partially_paid",
-    "paid",
-    "failed",
-    "cancelled",
-    "review",
-  ],
-  default: "unpaid",
-},
-// SSLCOMMERZ PAYMENT DETAILS
+    paymentStatus: {
+      type: String,
+      enum: [
+        "unpaid",
+        "pending",
+        "partially_paid",
+        "paid",
+        "failed",
+        "cancelled",
+        "review",
+      ],
+      default: "unpaid",
+    },
 
-paymentAmount: {
-  type: Number,
-  default: 0,
-  min: 0,
-},
+    // =========================
+    // SSLCOMMERZ PAYMENT DETAILS
+    // =========================
+    paymentAmount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
 
-paymentCurrency: {
-  type: String,
-  default: "BDT",
-},
+    paymentCurrency: {
+      type: String,
+      default: "BDT",
+    },
 
-sslcommerzTranId: {
-  type: String,
-  default: null,
-},
+    sslcommerzTranId: {
+      type: String,
+      default: null,
+      index: true,
+    },
 
-sslcommerzValidationId: {
-  type: String,
-  default: null,
-},
+    // এই field-টা আগে মিসিং ছিল → expected=NaN এর কারণ
+    sslcommerzExpectedAmount: {
+      type: Number,
+      default: null,
+      min: 0,
+    },
 
-bankTransactionId: {
-  type: String,
-  default: null,
-},
+    sslcommerzValidationId: {
+      type: String,
+      default: null,
+    },
+
+    bankTransactionId: {
+      type: String,
+      default: null,
+    },
+
     // =========================
     // DELIVERY METHOD
     // =========================
@@ -376,7 +388,7 @@ bankTransactionId: {
   },
   {
     timestamps: true,
-  },
+  }
 );
 
 // =========================
@@ -386,6 +398,8 @@ orderSchema.index({ createdAt: -1 });
 orderSchema.index({ assignedEmployee: 1, deliveryStatus: 1 });
 orderSchema.index({ assignedBy: 1 });
 orderSchema.index({ status: 1 });
+orderSchema.index({ paymentStatus: 1 });
+orderSchema.index({ sslcommerzTranId: 1 });
 
 // =========================
 // MODEL

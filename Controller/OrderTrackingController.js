@@ -4,319 +4,312 @@ import MainOrder from "../Model/MainOrder.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { apiResponse } from "../utils/ApiResponse.js";
 
-/* =========================================================
+/* =====================================================
    HELPERS
-========================================================= */
+===================================================== */
 
 const getUserId = (req) =>
   req.user?._id || req.user?.id || null;
+
+const getUserRole = (req) =>
+  String(req.user?.role || "").toLowerCase();
 
 const normalizeOrderId = (value = "") =>
   String(value).trim();
 
 const isValidObjectId = (value) =>
-  mongoose.Types.ObjectId.isValid(value);
+  mongoose.isValidObjectId(value);
 
+const isStaffRole = (role) =>
+  ["admin", "subadmin", "employee", "order_manager"].includes(role);
+
+const getProductImage = (product) => {
+  if (!product) return "";
+
+  if (typeof product.image === "string" && product.image.trim()) {
+    return product.image;
+  }
+
+  if (typeof product.productImage === "string" && product.productImage.trim()) {
+    return product.productImage;
+  }
+
+  if (Array.isArray(product.images) && product.images.length > 0) {
+    const firstImage = product.images[0];
+
+    if (typeof firstImage === "string") return firstImage;
+
+    if (firstImage?.url) return firstImage.url;
+  }
+
+  if (Array.isArray(product.colorImages) && product.colorImages.length > 0) {
+    const firstImage = product.colorImages[0];
+
+    if (typeof firstImage === "string") return firstImage;
+
+    if (firstImage?.url) return firstImage.url;
+  }
+
+  return "";
+};
+
+/**
+ * Order-এর product information normalize করে।
+ * Schema-তে যে field আছে তার পাশাপাশি legacy field-ও handle করে।
+ */
+const getSafeProductData = (product) => {
+  if (!product) return null;
+
+  return {
+    _id: product._id || null,
+    product: product.product || product.productId || null,
+    productId: product.productId || product.product || null,
+    name:
+      product.name ||
+      product.productName ||
+      product.title ||
+      "",
+    image: getProductImage(product),
+    quantity: Math.max(1, Number(product.quantity) || 1),
+    price: Number(product.price ?? product.salePrice ?? 0),
+    color: product.color || product.selectedColor || "",
+    ram: product.ram || product.selectedRam || "",
+    storage: product.storage || product.selectedStorage || "",
+    sku: product.sku || "",
+  };
+};
+
+/**
+ * API response-এ order-এর প্রয়োজনীয় safe data পাঠায়।
+ * Products বাদ না দিয়ে name, image, quantity-সহ return করে।
+ */
 const getSafeTrackingData = (order) => ({
-  orderId: order.orderId,
-  status: order.status,
-  deliveryStatus: order.deliveryStatus,
-  deliveryMethod: order.deliveryMethod,
+  _id: order._id,
+  orderId: order.orderId || "",
+  customer: order.customer || null,
+  customerName: order.customerName || "",
+  phone: order.phone || "",
+  email: order.email || "",
+
+  products: Array.isArray(order.products)
+    ? order.products.map(getSafeProductData).filter(Boolean)
+    : [],
+
+  subtotal: Number(order.subtotal ?? 0),
+  totalAmount: Number(order.totalAmount ?? 0),
+  discount: Number(order.discount ?? 0),
+  deliveryCharge: Number(order.deliveryCharge ?? 0),
+  paymentMethod: order.paymentMethod || "",
+  paymentStatus: order.paymentStatus || "",
+  status: order.status || "",
+  deliveryStatus: order.deliveryStatus || "",
+  deliveryMethod: order.deliveryMethod || "",
+
   courierDetails: {
     provider: order.courierDetails?.provider || "",
     trackingCode: order.courierDetails?.trackingCode || "",
     consignmentId: order.courierDetails?.consignmentId || "",
     courierStatus: order.courierDetails?.courierStatus || "",
   },
+
   deliveryNote: order.deliveryNote || "",
+
   deliveryHistory: (order.deliveryHistory || []).map((item) => ({
-    status: item.status,
+    status: item.status || "",
     note: item.note || "",
-    updatedAt: item.updatedAt,
+    updatedAt: item.updatedAt || null,
   })),
+
   statusHistory: (order.statusHistory || []).map((item) => ({
-    status: item.status,
+    status: item.status || "",
     note: item.note || "",
-    updatedAt: item.updatedAt,
+    updatedAt: item.updatedAt || null,
   })),
-  createdAt: order.createdAt,
-  updatedAt: order.updatedAt,
+
+  createdAt: order.createdAt || null,
+  updatedAt: order.updatedAt || null,
 });
 
-/* =========================================================
-   GET ORDER TRACKING BY ORDER ID
-   GET /api/tracking/:orderId
+/**
+ * Tracking-এর জন্য প্রয়োজনীয় fields।
+ * এখানে products অবশ্যই select করতে হবে।
+ */
+const TRACKING_SELECT = [
+  "orderId",
+  "customer",
+  "customerName",
+  "phone",
+  "email",
+  "products",
+  "subtotal",
+  "totalAmount",
+  "discount",
+  "deliveryCharge",
+  "paymentMethod",
+  "paymentStatus",
+  "status",
+  "deliveryStatus",
+  "deliveryMethod",
+  "courierDetails",
+  "deliveryNote",
+  "deliveryHistory",
+  "statusHistory",
+  "assignedEmployee",
+  "createdAt",
+  "updatedAt",
+].join(" ");
 
-   Requires login.
-   Customer can see only their own order.
-   Admin can see any order.
-   Employee can see only orders assigned to them.
-========================================================= */
+/* =====================================================
+   1. GET SINGLE ORDER TRACKING
+   GET /products/Coustomer-orders/:orderId
+===================================================== */
 
-export const getOrderTracking = asyncHandler(
-  async (req, res) => {
-    const orderId = normalizeOrderId(req.params.orderId);
+export const getOrderTracking = asyncHandler(async (req, res) => {
+  const userId = getUserId(req);
+  const role = getUserRole(req);
+  const orderId = normalizeOrderId(req.params.orderId);
 
-    if (!orderId) {
-      return apiResponse(res, 400, "Order ID is required");
-    }
+  if (!userId || !isValidObjectId(userId)) {
+    return apiResponse(res, 401, "Authentication required");
+  }
 
-    const userId = getUserId(req);
+  if (!orderId) {
+    return apiResponse(res, 400, "Order ID is required");
+  }
 
-    if (!userId) {
-      return apiResponse(res, 401, "Please login first");
-    }
+  let order = await MainOrder.findOne({ orderId })
+    .select(TRACKING_SELECT)
+    .lean();
 
-    const userRole = String(req.user?.role || "")
-      .toLowerCase()
-      .trim();
-
-    let order = await MainOrder.findOne({ orderId })
-      .select(
-        [
-          "orderId",
-          "customer",
-          "status",
-          "deliveryStatus",
-          "deliveryMethod",
-          "courierDetails",
-          "deliveryNote",
-          "deliveryHistory",
-          "statusHistory",
-          "assignedEmployee",
-          "createdAt",
-          "updatedAt",
-        ].join(" ")
-      )
+  // MongoDB _id দিয়েও খোঁজার সুবিধা।
+  if (!order && isValidObjectId(orderId)) {
+    order = await MainOrder.findById(orderId)
+      .select(TRACKING_SELECT)
       .lean();
-
-    // Also support MongoDB document ID.
-    if (!order && isValidObjectId(orderId)) {
-      order = await MainOrder.findById(orderId)
-        .select(
-          [
-            "orderId",
-            "customer",
-            "status",
-            "deliveryStatus",
-            "deliveryMethod",
-            "courierDetails",
-            "deliveryNote",
-            "deliveryHistory",
-            "statusHistory",
-            "assignedEmployee",
-            "createdAt",
-            "updatedAt",
-          ].join(" ")
-        )
-        .lean();
-    }
-
-    if (!order) {
-      return apiResponse(res, 404, "Order not found");
-    }
-
-    const isAdmin = [
-      "admin",
-      "subadmin",
-    ].includes(userRole);
-
-    const isOwner =
-      String(order.customer) === String(userId);
-
-    const isAssignedEmployee =
-      String(order.assignedEmployee || "") === String(userId);
-
-    if (
-      !isAdmin &&
-      !isOwner &&
-      !isAssignedEmployee
-    ) {
-      return apiResponse(
-        res,
-        403,
-        "You are not allowed to view this order"
-      );
-    }
-
-    return apiResponse(
-      res,
-      200,
-      "Order tracking fetched successfully",
-      getSafeTrackingData(order)
-    );
   }
-);
 
-/* =========================================================
-   GET MY ORDERS BY AUTHENTICATED CUSTOMER PHONE
-   GET /api/tracking/my-orders
-
-   Requires login.
-   Uses the authenticated user's phone number,
-   not an arbitrary phone number from the request.
-========================================================= */
-
-export const getCustomerOrdersByPhone = asyncHandler(
-  async (req, res) => {
-    const userId = getUserId(req);
-
-    if (!userId) {
-      return apiResponse(res, 401, "Please login first");
-    }
-
-    const phone = String(req.user?.phone || "").trim();
-
-    if (!phone) {
-      return apiResponse(
-        res,
-        400,
-        "Phone number is not available on your account"
-      );
-    }
-
-    const page = Math.max(
-      1,
-      Number.parseInt(req.query.page, 10) || 1
-    );
-
-    const limit = Math.min(
-      50,
-      Math.max(
-        1,
-        Number.parseInt(req.query.limit, 10) || 10
-      )
-    );
-
-    const filter = {
-      customer: userId,
-      phone,
-    };
-
-    const [orders, total] = await Promise.all([
-      MainOrder.find(filter)
-        .select(
-          [
-            "orderId",
-            "status",
-            "deliveryStatus",
-            "deliveryMethod",
-            "courierDetails.provider",
-            "courierDetails.trackingCode",
-            "courierDetails.consignmentId",
-            "courierDetails.courierStatus",
-            "deliveryNote",
-            "deliveryHistory",
-            "statusHistory",
-            "totalAmount",
-            "paymentStatus",
-            "createdAt",
-            "updatedAt",
-          ].join(" ")
-        )
-        .sort({ createdAt: -1 })
-        .skip((page - 1) * limit)
-        .limit(limit)
-        .lean(),
-
-      MainOrder.countDocuments(filter),
-    ]);
-
-    return apiResponse(
-      res,
-      200,
-      "Your orders fetched successfully",
-      {
-        orders: orders.map(getSafeTrackingData),
-        pagination: {
-          page,
-          limit,
-          total,
-          totalPages: Math.ceil(total / limit),
-        },
-      }
-    );
+  if (!order) {
+    return apiResponse(res, 404, "Order not found");
   }
-);
 
-/* =========================================================
-   GET MY ORDER TRACKING
-   GET /api/tracking/my-order/:orderId
+  const isOwner =
+    String(order.customer || "") === String(userId);
 
-   Requires login.
-   Only the authenticated order owner can access it.
-========================================================= */
+  const isAssignedEmployee =
+    String(order.assignedEmployee || "") === String(userId);
 
-export const getMyOrderTracking = asyncHandler(
-  async (req, res) => {
-    const orderId = normalizeOrderId(req.params.orderId);
-    const userId = getUserId(req);
+  if (!isOwner && !isStaffRole(role) && !isAssignedEmployee) {
+    return apiResponse(res, 403, "You are not allowed to view this order");
+  }
 
-    if (!userId) {
-      return apiResponse(res, 401, "Please login first");
+  return apiResponse(
+    res,
+    200,
+    "Order tracking fetched successfully",
+    { order: getSafeTrackingData(order) }
+  );
+});
+
+/* =====================================================
+   2. GET CUSTOMER'S ORDERS
+   GET /products/Coustomer-orders
+===================================================== */
+
+export const getCustomerOrdersByPhone = asyncHandler(async (req, res) => {
+  const userId = getUserId(req);
+
+  if (!userId || !isValidObjectId(userId)) {
+    return apiResponse(res, 401, "Authentication required");
+  }
+
+  const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+  const limit = Math.min(
+    100,
+    Math.max(1, parseInt(req.query.limit, 10) || 10)
+  );
+
+  const skip = (page - 1) * limit;
+
+  // Authenticated customer-এর order-ই দেখানো হবে।
+  // শুধু phone-এর উপর নির্ভর করে অন্যের order প্রকাশ করা হবে না।
+  const filter = { customer: userId };
+
+  const [orders, totalOrders] = await Promise.all([
+    MainOrder.find(filter)
+      .select(TRACKING_SELECT)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean(),
+
+    MainOrder.countDocuments(filter),
+  ]);
+
+  const totalPages = Math.ceil(totalOrders / limit);
+
+  return apiResponse(
+    res,
+    200,
+    "Your orders fetched successfully",
+    {
+      orders: orders.map(getSafeTrackingData),
+      pagination: {
+        page,
+        limit,
+        totalOrders,
+        totalPages,
+        hasNextPage: page < totalPages,
+        hasPrevPage: page > 1,
+      },
     }
+  );
+});
 
-    if (!orderId) {
-      return apiResponse(res, 400, "Order ID is required");
-    }
+/* =====================================================
+   3. GET MY SINGLE ORDER TRACKING
+   GET /products/orders/:orderId
+===================================================== */
 
-    let order = await MainOrder.findOne({
-      orderId,
+export const getMyOrderTracking = asyncHandler(async (req, res) => {
+  const userId = getUserId(req);
+  const orderId = normalizeOrderId(req.params.orderId);
+
+  if (!userId || !isValidObjectId(userId)) {
+    return apiResponse(res, 401, "Authentication required");
+  }
+
+  if (!orderId) {
+    return apiResponse(res, 400, "Order ID is required");
+  }
+
+  let order = await MainOrder.findOne({
+    orderId,
+    customer: userId,
+  })
+    .select(TRACKING_SELECT)
+    .lean();
+
+  if (!order && isValidObjectId(orderId)) {
+    order = await MainOrder.findOne({
+      _id: orderId,
       customer: userId,
     })
-      .select(
-        [
-          "orderId",
-          "customer",
-          "status",
-          "deliveryStatus",
-          "deliveryMethod",
-          "courierDetails",
-          "deliveryNote",
-          "deliveryHistory",
-          "statusHistory",
-          "createdAt",
-          "updatedAt",
-        ].join(" ")
-      )
+      .select(TRACKING_SELECT)
       .lean();
+  }
 
-    if (!order && isValidObjectId(orderId)) {
-      order = await MainOrder.findOne({
-        _id: orderId,
-        customer: userId,
-      })
-        .select(
-          [
-            "orderId",
-            "customer",
-            "status",
-            "deliveryStatus",
-            "deliveryMethod",
-            "courierDetails",
-            "deliveryNote",
-            "deliveryHistory",
-            "statusHistory",
-            "createdAt",
-            "updatedAt",
-          ].join(" ")
-        )
-        .lean();
-    }
-
-    if (!order) {
-      return apiResponse(
-        res,
-        404,
-        "Order not found for your account"
-      );
-    }
-
+  if (!order) {
     return apiResponse(
       res,
-      200,
-      "Your order tracking fetched successfully",
-      getSafeTrackingData(order)
+      404,
+      "Order not found or you do not have permission to view it"
     );
   }
-);
+
+  return apiResponse(
+    res,
+    200,
+    "Your order tracking fetched successfully",
+    { order: getSafeTrackingData(order) }
+  );
+});

@@ -216,7 +216,7 @@ router.patch(
 
 
 
-app.get("/api/cron/cleanup-expired-otps", async (req, res) => {
+router.get("/api/cron/cleanup-expired-otps", async (req, res) => {
   try {
 
     if (

@@ -215,6 +215,7 @@ export const getOrderTracking = asyncHandler(async (req, res) => {
    GET /products/Coustomer-orders
 ===================================================== */
 
+
 export const getCustomerOrdersByPhone = asyncHandler(async (req, res) => {
   const userId = getUserId(req);
 
@@ -223,6 +224,7 @@ export const getCustomerOrdersByPhone = asyncHandler(async (req, res) => {
   }
 
   const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+
   const limit = Math.min(
     100,
     Math.max(1, parseInt(req.query.limit, 10) || 10)
@@ -230,13 +232,25 @@ export const getCustomerOrdersByPhone = asyncHandler(async (req, res) => {
 
   const skip = (page - 1) * limit;
 
-  // Authenticated customer-এর order-ই দেখানো হবে।
-  // শুধু phone-এর উপর নির্ভর করে অন্যের order প্রকাশ করা হবে না।
+  // শুধু login করা customer-এর নিজের order
   const filter = { customer: userId };
 
   const [orders, totalOrders] = await Promise.all([
     MainOrder.find(filter)
       .select(TRACKING_SELECT)
+
+      // Assigned employee-এর name, phone, email
+      .populate({
+        path: "assignedEmployee",
+        select: "name fullName username phone email role",
+      })
+
+      // যিনি employee-কে assign করেছেন
+      .populate({
+        path: "assignedBy",
+        select: "name fullName username email role",
+      })
+
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
@@ -247,12 +261,48 @@ export const getCustomerOrdersByPhone = asyncHandler(async (req, res) => {
 
   const totalPages = Math.ceil(totalOrders / limit);
 
+  // Tracking response-এ employee information রাখা
+  const safeOrders = orders.map((order) => {
+    const safeOrder = getSafeTrackingData(order);
+
+    return {
+      ...safeOrder,
+
+      assignedEmployee: order.assignedEmployee
+        ? {
+            _id: order.assignedEmployee._id,
+            name:
+              order.assignedEmployee.name ||
+              order.assignedEmployee.fullName ||
+              order.assignedEmployee.username ||
+              "Employee",
+            phone: order.assignedEmployee.phone || "",
+            email: order.assignedEmployee.email || "",
+            role: order.assignedEmployee.role || "",
+          }
+        : null,
+
+      assignedBy: order.assignedBy
+        ? {
+            _id: order.assignedBy._id,
+            name:
+              order.assignedBy.name ||
+              order.assignedBy.fullName ||
+              order.assignedBy.username ||
+              "",
+            email: order.assignedBy.email || "",
+            role: order.assignedBy.role || "",
+          }
+        : null,
+    };
+  });
+
   return apiResponse(
     res,
     200,
     "Your orders fetched successfully",
     {
-      orders: orders.map(getSafeTrackingData),
+      orders: safeOrders,
       pagination: {
         page,
         limit,

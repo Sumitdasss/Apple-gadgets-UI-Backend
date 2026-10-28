@@ -38,6 +38,7 @@ import { authorizeRoles } from "../Middleware/roleMiddleware.js";
 import { createLandingPage, deleteLandingPage, getLandingPageById, getLandingPages, getPublishedLandingPage, getPublishedLandingPageBanners, getPublishedOffers, setLandingPageStatus, updateLandingPage } from "../Controller/LandingPageController.js";
 import { assignOrder, getEmployeeReportById, getEmployeeReportSummary, getEmployees, getMyOrders, reassignOrder, updateEmployeeOrderStatus } from "../Controller/EmployeeController.js";
  import { initiateSSLCommerzPayment, sslcommerzCancel, sslcommerzFail, sslcommerzIPN, sslcommerzSuccess } from "../Controller/sslcommerzController.js";
+import { getCustomerOrdersByPhone, getMyOrderTracking, getOrderTracking } from "../Controller/OrderTrackingController.js";
 const router = express.Router();
 
 router.post(
@@ -185,7 +186,25 @@ router.patch(
   authorizeRoles("employee"),
   updateEmployeeOrderStatus
 );
+router.get(
+  "/Coustomer-orders",
+  verifyToken,
+  getCustomerOrdersByPhone
+);
 
+// Customer's own order tracking.
+router.get(
+  "/orders/:orderId",
+  verifyToken,
+  getMyOrderTracking
+);
+
+// Admin, assigned employee, or order owner.
+router.get(
+  "/Coustomer-orders/:orderId",
+  verifyToken,
+  getOrderTracking
+);
 
 router.post("/initiate", verifyToken, initiateSSLCommerzPayment);
 

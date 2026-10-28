@@ -281,6 +281,31 @@ const orderSchema = new mongoose.Schema(
       },
     },
 
+statusHistory: [
+  {
+    status: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    note: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    updatedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Customer",
+      default: null,
+    },
+    updatedAt: {
+      type: Date,
+      default: Date.now,
+    },
+  },
+],
+
+
     // =========================
     // EMPLOYEE ASSIGNMENT
     // =========================

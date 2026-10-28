@@ -8,11 +8,17 @@ import Customer from "../Model/Customer.js";
 import { apiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { sendOtpEmail } from "../Service/SendOtpHandler.js";
+
 import {
   getCustomerCache,
   setCustomerCache,
   clearCustomerCache,
 } from "../utils/customerCache.js";
+
+// =====================================================
+// CONFIG
+// =====================================================
+
 const OTP_EXPIRY_MS = 5 * 60 * 1000;
 const MAX_LOGIN_OTP_ATTEMPTS = 5;
 
@@ -27,6 +33,9 @@ const createOtpExpiry = () =>
 
 const normalizeEmail = (email = "") =>
   email.trim().toLowerCase();
+
+const isValidId = (id) =>
+  mongoose.isValidObjectId(id);
 
 const sanitizeCustomer = (customer) => {
   if (!customer) return null;
@@ -49,7 +58,38 @@ const sanitizeCustomer = (customer) => {
   return user;
 };
 
-const isValidId = (id) => mongoose.isValidObjectId(id);
+// Expiry check and cleanup for registration OTP.
+const clearExpiredEmailOtp = async (customer) => {
+  const expired =
+    !customer.emailOtpHash ||
+    !customer.emailOtpExpires ||
+    new Date(customer.emailOtpExpires).getTime() <= Date.now();
+
+  if (expired) {
+    customer.emailOtpHash = null;
+    customer.emailOtpExpires = null;
+    await customer.save();
+  }
+
+  return expired;
+};
+
+// Expiry check and cleanup for login OTP.
+const clearExpiredLoginOtp = async (customer) => {
+  const expired =
+    !customer.loginOtpHash ||
+    !customer.loginOtpExpires ||
+    new Date(customer.loginOtpExpires).getTime() <= Date.now();
+
+  if (expired) {
+    customer.loginOtpHash = null;
+    customer.loginOtpExpires = null;
+    customer.loginOtpAttempts = 0;
+    await customer.save();
+  }
+
+  return expired;
+};
 
 // =====================================================
 // REGISTER
@@ -59,16 +99,21 @@ export const register = asyncHandler(async (req, res) => {
   const { name, email, password, address, phone } = req.body;
 
   if (
-    !name?.trim() ||
-    !email?.trim() ||
+    typeof name !== "string" ||
+    typeof email !== "string" ||
+    typeof password !== "string" ||
+    typeof address !== "string" ||
+    typeof phone !== "string" ||
+    !name.trim() ||
+    !email.trim() ||
     !password ||
-    !address?.trim() ||
-    !phone?.trim()
+    !address.trim() ||
+    !phone.trim()
   ) {
     return apiResponse(res, 400, "All fields are required");
   }
 
-  if (typeof password !== "string" || password.length < 6) {
+  if (password.length < 6) {
     return apiResponse(
       res,
       400,
@@ -96,11 +141,12 @@ export const register = asyncHandler(async (req, res) => {
 
   const otp = generateOtp();
   const otpHash = await bcrypt.hash(otp, 10);
+  const hashedPassword = await bcrypt.hash(password, 10);
 
   const customer = await Customer.create({
     name: name.trim(),
     email: normalizedEmail,
-    password: await bcrypt.hash(password, 10),
+    password: hashedPassword,
     address: address.trim(),
     phone: normalizedPhone,
     isEmailVerified: false,
@@ -117,6 +163,10 @@ export const register = asyncHandler(async (req, res) => {
     );
   } catch (error) {
     console.error("Registration OTP email failed:", error);
+
+    customer.emailOtpHash = null;
+    customer.emailOtpExpires = null;
+    await customer.save();
 
     return apiResponse(
       res,
@@ -137,18 +187,12 @@ export const register = asyncHandler(async (req, res) => {
 });
 
 // =====================================================
-// VERIFY REGISTRATION EMAIL OTP
-// =====================================================
-
-
-// =====================================================
 // VERIFY REGISTRATION EMAIL OTP AND AUTO LOGIN
 // =====================================================
 
 export const verifyEmailOtp = asyncHandler(async (req, res) => {
   const { email, otp } = req.body;
 
-  // Validate input
   if (
     typeof email !== "string" ||
     typeof otp !== "string" ||
@@ -158,11 +202,12 @@ export const verifyEmailOtp = asyncHandler(async (req, res) => {
     return apiResponse(res, 400, "Email and OTP are required");
   }
 
-  if (!/^\d{6}$/.test(otp.trim())) {
+  const cleanOtp = otp.trim();
+
+  if (!/^\d{6}$/.test(cleanOtp)) {
     return apiResponse(res, 400, "OTP must contain 6 digits");
   }
 
-  // Find customer
   const customer = await Customer.findOne({
     email: normalizeEmail(email),
   }).select("+emailOtpHash +emailOtpExpires");
@@ -172,15 +217,15 @@ export const verifyEmailOtp = asyncHandler(async (req, res) => {
   }
 
   if (customer.isEmailVerified) {
-    return apiResponse(res, 400, "Email already verified. Please log in.");
+    return apiResponse(
+      res,
+      400,
+      "Email already verified. Please log in."
+    );
   }
 
-  // Check OTP expiry
-  if (
-    !customer.emailOtpHash ||
-    !customer.emailOtpExpires ||
-    new Date(customer.emailOtpExpires).getTime() <= Date.now()
-  ) {
+  // Expired OTP is cleared when verification is attempted.
+  if (await clearExpiredEmailOtp(customer)) {
     return apiResponse(
       res,
       400,
@@ -188,9 +233,8 @@ export const verifyEmailOtp = asyncHandler(async (req, res) => {
     );
   }
 
-  // Verify OTP
   const isCorrect = await bcrypt.compare(
-    otp.trim(),
+    cleanOtp,
     customer.emailOtpHash
   );
 
@@ -198,19 +242,16 @@ export const verifyEmailOtp = asyncHandler(async (req, res) => {
     return apiResponse(res, 400, "Invalid OTP");
   }
 
-  // Ensure JWT secret exists
   if (!process.env.JWT_ACCESS_SECRET) {
     throw new Error("JWT_ACCESS_SECRET is missing");
   }
 
-  // Mark email as verified
   customer.isEmailVerified = true;
-  customer.emailOtpHash = undefined;
-  customer.emailOtpExpires = undefined;
+  customer.emailOtpHash = null;
+  customer.emailOtpExpires = null;
 
   await customer.save();
 
-  // Generate JWT token for automatic login
   const token = jwt.sign(
     {
       id: customer._id.toString(),
@@ -220,7 +261,6 @@ export const verifyEmailOtp = asyncHandler(async (req, res) => {
     { expiresIn: "7d" }
   );
 
-  // Return token and safe user data
   return apiResponse(
     res,
     200,
@@ -231,7 +271,6 @@ export const verifyEmailOtp = asyncHandler(async (req, res) => {
     }
   );
 });
-
 
 // =====================================================
 // RESEND REGISTRATION OTP
@@ -264,7 +303,6 @@ export const resendEmailOtp = asyncHandler(async (req, res) => {
   await customer.save();
 
   try {
-    // Keep the same argument order as registration.
     await sendOtpEmail(
       customer.email,
       otp,
@@ -274,9 +312,8 @@ export const resendEmailOtp = asyncHandler(async (req, res) => {
   } catch (error) {
     console.error("Resend email OTP failed:", error);
 
-    customer.emailOtpHash = undefined;
-    customer.emailOtpExpires = undefined;
-
+    customer.emailOtpHash = null;
+    customer.emailOtpExpires = null;
     await customer.save();
 
     return apiResponse(res, 502, "Could not send OTP email");
@@ -313,11 +350,7 @@ export const login = asyncHandler(async (req, res) => {
     email: normalizeEmail(email),
   }).select("+password");
 
-  if (!customer) {
-    return apiResponse(res, 401, "Invalid email or password");
-  }
-
-  if (!customer.password) {
+  if (!customer || !customer.password) {
     return apiResponse(res, 401, "Invalid email or password");
   }
 
@@ -360,8 +393,8 @@ export const login = asyncHandler(async (req, res) => {
   } catch (error) {
     console.error("Login OTP email failed:", error);
 
-    customer.loginOtpHash = undefined;
-    customer.loginOtpExpires = undefined;
+    customer.loginOtpHash = null;
+    customer.loginOtpExpires = null;
     customer.loginOtpAttempts = 0;
 
     await customer.save();
@@ -369,11 +402,15 @@ export const login = asyncHandler(async (req, res) => {
     return apiResponse(res, 502, "Could not send login OTP");
   }
 
-  // Do not issue a JWT until the login OTP is verified.
-  return apiResponse(res, 200, "Login OTP sent to your email", {
-    email: customer.email,
-    requiresLoginOtp: true,
-  });
+  return apiResponse(
+    res,
+    200,
+    "Login OTP sent to your email",
+    {
+      email: customer.email,
+      requiresLoginOtp: true,
+    }
+  );
 });
 
 // =====================================================
@@ -392,7 +429,9 @@ export const verifyLoginOtp = asyncHandler(async (req, res) => {
     return apiResponse(res, 400, "Email and OTP are required");
   }
 
-  if (!/^\d{6}$/.test(otp.trim())) {
+  const cleanOtp = otp.trim();
+
+  if (!/^\d{6}$/.test(cleanOtp)) {
     return apiResponse(res, 400, "OTP must contain 6 digits");
   }
 
@@ -417,11 +456,7 @@ export const verifyLoginOtp = asyncHandler(async (req, res) => {
     );
   }
 
-  if (
-    !customer.loginOtpHash ||
-    !customer.loginOtpExpires ||
-    new Date(customer.loginOtpExpires).getTime() <= Date.now()
-  ) {
+  if (await clearExpiredLoginOtp(customer)) {
     return apiResponse(
       res,
       400,
@@ -432,8 +467,8 @@ export const verifyLoginOtp = asyncHandler(async (req, res) => {
   if (
     (customer.loginOtpAttempts || 0) >= MAX_LOGIN_OTP_ATTEMPTS
   ) {
-    customer.loginOtpHash = undefined;
-    customer.loginOtpExpires = undefined;
+    customer.loginOtpHash = null;
+    customer.loginOtpExpires = null;
     customer.loginOtpAttempts = 0;
 
     await customer.save();
@@ -446,13 +481,29 @@ export const verifyLoginOtp = asyncHandler(async (req, res) => {
   }
 
   const isCorrect = await bcrypt.compare(
-    otp.trim(),
+    cleanOtp,
     customer.loginOtpHash
   );
 
   if (!isCorrect) {
     customer.loginOtpAttempts =
       (customer.loginOtpAttempts || 0) + 1;
+
+    if (
+      customer.loginOtpAttempts >= MAX_LOGIN_OTP_ATTEMPTS
+    ) {
+      customer.loginOtpHash = null;
+      customer.loginOtpExpires = null;
+      customer.loginOtpAttempts = 0;
+
+      await customer.save();
+
+      return apiResponse(
+        res,
+        429,
+        "Too many incorrect OTP attempts. Please log in again."
+      );
+    }
 
     await customer.save();
 
@@ -472,9 +523,9 @@ export const verifyLoginOtp = asyncHandler(async (req, res) => {
     { expiresIn: "7d" }
   );
 
-  // Clear OTP so it cannot be reused.
-  customer.loginOtpHash = undefined;
-  customer.loginOtpExpires = undefined;
+  // Clear OTP after successful verification.
+  customer.loginOtpHash = null;
+  customer.loginOtpExpires = null;
   customer.loginOtpAttempts = 0;
 
   await customer.save();
@@ -506,7 +557,6 @@ export const getMyProfile = asyncHandler(async (req, res) => {
 // GET ALL CUSTOMERS
 // GET /api/customers/AllCustomers
 // =====================================================
-
 
 export const getAllCustomers = async (req, res) => {
   try {
@@ -601,7 +651,6 @@ export const getAllCustomers = async (req, res) => {
   }
 };
 
-
 // =====================================================
 // GET CUSTOMER BY ID
 // GET /api/customers/getCustomer/:id
@@ -651,7 +700,6 @@ export const getCustomerById = async (req, res) => {
 // =====================================================
 // UPDATE CUSTOMER STATUS
 // PATCH /api/customers/updateCustomerStatus/:id
-// Body: { "isActive": true }
 // =====================================================
 
 export const updateCustomerStatus = async (req, res) => {
@@ -691,8 +739,8 @@ export const updateCustomerStatus = async (req, res) => {
 
     customer.isActive = isActive;
 
-await customer.save();
-await clearCustomerCache();
+    await customer.save();
+    await clearCustomerCache();
 
     return res.status(200).json({
       success: true,
@@ -748,7 +796,7 @@ export const deleteCustomer = async (req, res) => {
     }
 
     await Customer.deleteOne({ _id: customer._id });
-await clearCustomerCache();
+    await clearCustomerCache();
 
     return res.status(200).json({
       success: true,
@@ -767,11 +815,9 @@ await clearCustomerCache();
   }
 };
 
-
-
-
-
-
+// =====================================================
+// UPDATE CUSTOMER ROLE
+// =====================================================
 
 export const updateCustomerRole = async (req, res) => {
   try {
@@ -814,8 +860,9 @@ export const updateCustomerRole = async (req, res) => {
     }
 
     customer.role = role;
-await customer.save();
-await clearCustomerCache();
+
+    await customer.save();
+    await clearCustomerCache();
 
     return res.status(200).json({
       success: true,
@@ -843,5 +890,3 @@ await clearCustomerCache();
     });
   }
 };
-
-

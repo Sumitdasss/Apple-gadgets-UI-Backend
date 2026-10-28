@@ -255,31 +255,50 @@ const orderSchema = new mongoose.Schema(
     // =========================
     // COURIER INFORMATION
     // =========================
-    courierDetails: {
-      provider: {
-        type: String,
-        default: "",
-        trim: true,
-      },
-
-      trackingCode: {
-        type: String,
-        default: "",
-        trim: true,
-      },
-
-      consignmentId: {
-        type: String,
-        default: "",
-        trim: true,
-      },
-
-      courierStatus: {
-        type: String,
-        default: "",
-        trim: true,
-      },
-    },
+    // COURIER INFORMATION — update this block
+courierDetails: {
+  provider: {
+    type: String,
+    default: "",
+    trim: true,
+  },
+  trackingCode: {
+    type: String,
+    default: "",
+    trim: true,
+  },
+  consignmentId: {
+    type: String,
+    default: "",
+    trim: true,
+  },
+  courierStatus: {
+    type: String,
+    default: "",
+    trim: true,
+  },
+  // Custom delivery person (manual assign)
+  riderName: {
+    type: String,
+    default: "",
+    trim: true,
+  },
+  riderPhone: {
+    type: String,
+    default: "",
+    trim: true,
+  },
+  riderEmail: {
+    type: String,
+    default: "",
+    trim: true,
+  },
+  riderAddress: {
+    type: String,
+    default: "",
+    trim: true,
+  },
+},
 
 statusHistory: [
   {

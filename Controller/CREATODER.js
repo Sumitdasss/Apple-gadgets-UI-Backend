@@ -1036,3 +1036,82 @@ export const getOrderNavigation = async (req, res, next) => {
     next(error);
   }
 };
+
+
+export const assignCourierRider = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
+      riderName,
+      riderPhone,
+      riderEmail,
+      riderAddress,
+      provider,
+      trackingCode,
+      note,
+    } = req.body || {};
+
+    if (!riderName?.trim() || !riderPhone?.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Rider name and phone are required.",
+      });
+    }
+
+    const order = await MainOrder.findById(id);
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found.",
+      });
+    }
+
+    const prev =
+      order.courierDetails?.toObject?.() || order.courierDetails || {};
+
+    order.courierDetails = {
+      ...prev,
+      riderName: String(riderName).trim(),
+      riderPhone: String(riderPhone).trim(),
+      riderEmail: String(riderEmail || "").trim(),
+      riderAddress: String(riderAddress || "").trim(),
+      provider: String(provider || prev.provider || "").trim(),
+      trackingCode: String(trackingCode || prev.trackingCode || "").trim(),
+      consignmentId: prev.consignmentId || "",
+      courierStatus: prev.courierStatus || "",
+    };
+
+    if (!order.deliveryStatus || order.deliveryStatus === "unassigned") {
+      order.deliveryStatus = "assigned";
+    }
+
+    if (!Array.isArray(order.deliveryHistory)) {
+      order.deliveryHistory = [];
+    }
+
+    order.deliveryHistory.push({
+      status: "assigned",
+      note:
+        note?.trim() ||
+        `Courier rider assigned: ${String(riderName).trim()} (${String(
+          riderPhone
+        ).trim()})`,
+      updatedBy: req.user?._id || null,
+      updatedAt: new Date(),
+    });
+
+    await order.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Courier rider assigned successfully.",
+      data: order,
+    });
+  } catch (error) {
+    console.error("assignCourierRider:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Could not assign courier rider.",
+    });
+  }
+};

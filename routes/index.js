@@ -28,7 +28,7 @@ import {
   updateCategoryBanner,
 } from "../Controller/Catgorihandelar.js";
 import { categoryCacheMiddleware } from "../utils/categoryCache.js";
-import {  createOrder, getAllOrders, getOrderByOrderId, getOrderDetails, getOrderNavigation  } from "../Controller/CREATODER.js";
+import {  assignCourierRider, createOrder, getAllOrders, getOrderByOrderId, getOrderDetails, getOrderNavigation  } from "../Controller/CREATODER.js";
 import { OderActivity } from "../Controller/ShowOderactivity.js";
 import { getDashboardSummary } from "../Controller/Deshbord.js";
 import { bulkUpdateOrders, deleteOrder, getOrders, updateOrder } from "../Controller/OrderMange.js";
@@ -204,6 +204,13 @@ router.get(
   "/Coustomer-orders/:orderId",
   verifyToken,
   getOrderTracking
+);
+
+
+router.patch(
+  "/orders/:id/courier-rider",
+  
+  assignCourierRider
 );
 
 router.post("/initiate", verifyToken, initiateSSLCommerzPayment);

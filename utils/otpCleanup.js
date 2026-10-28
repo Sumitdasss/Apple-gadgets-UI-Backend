@@ -2,39 +2,30 @@
 import Customer from "../Model/Customer.js";
 
 export const startOtpCleanup = async () => {
-  try {
-    const now = new Date();
+  const now = new Date();
 
-    const result = await Customer.updateMany(
-      {
-        isEmailVerified: false,
-        emailOtpExpires: {
-          $exists: true,
-          $ne: null,
-          $lte: now,
-        },
-        emailOtpHash: {
-          $exists: true,
-          $ne: null,
-        },
+  const registrationResult = await Customer.updateMany(
+    {
+      isEmailVerified: false,
+      emailOtpHash: { $exists: true, $ne: null },
+      emailOtpExpires: {
+        $exists: true,
+        $ne: null,
+        $lte: now,
       },
-      {
-        $unset: {
-          emailOtpHash: 1,
-          emailOtpExpires: 1,
-        },
-      }
-    );
-
-    if (result.modifiedCount > 0) {
-      console.log(
-        `Expired registration OTPs cleaned: ${result.modifiedCount}`
-      );
+    },
+    {
+      $unset: {
+        emailOtpHash: 1,
+        emailOtpExpires: 1,
+      },
     }
+  );
 
-    return result.modifiedCount;
-  } catch (error) {
-    console.error("OTP cleanup failed:", error.message);
-    throw error;
-  }
+  const loginResult = await cleanupExpiredLoginOtps();
+
+  return (
+    registrationResult.modifiedCount +
+    loginResult
+  );
 };

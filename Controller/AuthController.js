@@ -843,46 +843,42 @@ await clearCustomerCache();
     });
   }
 };
-const OTP_CLEANUP_INTERVAL = 30 * 1000; // প্রতি ৩০ সেকেন্ডে check
+// প্রতি ৩০ সেকেন্ডে check
 
-export const startOtpCleanup = () => {
-  const cleanup = async () => {
-    try {
-      const now = new Date();
+export const startOtpCleanup = async () => {
+  try {
+    const now = new Date();
 
-      const result = await Customer.updateMany(
-        {
-          isEmailVerified: false,
-          emailOtpExpires: {
-            $ne: null,
-            $lte: now,
-          },
-          emailOtpHash: { $exists: true, $ne: null },
+    const result = await Customer.updateMany(
+      {
+        isEmailVerified: false,
+        emailOtpExpires: {
+          $exists: true,
+          $ne: null,
+          $lte: now,
         },
-        {
-          $unset: {
-            emailOtpHash: 1,
-            emailOtpExpires: 1,
-          },
-        }
-      );
-
-      if (result.modifiedCount > 0) {
-        console.log(
-          `Expired registration OTPs cleaned: ${result.modifiedCount}`
-        );
+        emailOtpHash: {
+          $exists: true,
+          $ne: null,
+        },
+      },
+      {
+        $unset: {
+          emailOtpHash: 1,
+          emailOtpExpires: 1,
+        },
       }
-    } catch (error) {
-      console.error("OTP cleanup failed:", error.message);
+    );
+
+    if (result.modifiedCount > 0) {
+      console.log(
+        `Expired registration OTPs cleaned: ${result.modifiedCount}`
+      );
     }
-  };
 
-  // Server চালু হলে একবার cleanup
-  void cleanup();
-
-  // এরপর প্রতি ৩০ সেকেন্ডে cleanup
-  return setInterval(() => {
-    void cleanup();
-  }, OTP_CLEANUP_INTERVAL);
+    return result.modifiedCount;
+  } catch (error) {
+    console.error("OTP cleanup failed:", error.message);
+    return 0;
+  }
 };
-

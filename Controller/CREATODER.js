@@ -94,6 +94,7 @@ const getColorImage = (product, selectedColor) => {
    POST /api/orders
 ========================================================= */
 
+
 export const createOrder = async (req, res) => {
   try {
     const {
@@ -113,7 +114,9 @@ export const createOrder = async (req, res) => {
       orderSource,
     } = req.body;
 
-    /* BASIC VALIDATION */
+    /* =========================
+       BASIC VALIDATION
+    ========================= */
 
     if (
       typeof customerName !== "string" ||
@@ -164,10 +167,15 @@ export const createOrder = async (req, res) => {
     }
 
     const cleanPhone = phone.trim();
-    const cleanEmail =
-      typeof email === "string" ? email.trim().toLowerCase() : "";
 
-    /* FIND OR CREATE CUSTOMER */
+    const cleanEmail =
+      typeof email === "string"
+        ? email.trim().toLowerCase()
+        : "";
+
+    /* =========================
+       FIND OR CREATE CUSTOMER
+    ========================= */
 
     let customer = await Customer.findOne({
       phone: cleanPhone,
@@ -192,7 +200,10 @@ export const createOrder = async (req, res) => {
       await customer.save();
     }
 
-    /* PREPARE PRODUCTS AND STOCK UPDATES */
+    /* =========================
+       PREPARE PRODUCTS
+       AND STOCK UPDATES
+    ========================= */
 
     const orderProducts = [];
     const stockUpdates = [];
@@ -219,7 +230,9 @@ export const createOrder = async (req, res) => {
       if (!product) {
         return res.status(404).json({
           success: false,
-          message: `Product not found: ${item.name || "Unknown product"}`,
+          message: `Product not found: ${
+            item.name || "Unknown product"
+          }`,
         });
       }
 
@@ -242,9 +255,12 @@ export const createOrder = async (req, res) => {
 
       let matchedVariant = null;
 
-      if (Array.isArray(product.variants) && product.variants.length) {
+      if (
+        Array.isArray(product.variants) &&
+        product.variants.length > 0
+      ) {
         const selectedVariantId = normalizeValue(
-          selectedVariant.variantId,
+          selectedVariant.variantId
         );
 
         if (
@@ -253,14 +269,14 @@ export const createOrder = async (req, res) => {
         ) {
           matchedVariant = product.variants.find(
             (variant) =>
-              String(variant._id) === selectedVariantId,
+              String(variant._id) === selectedVariantId
           );
         }
 
         if (!matchedVariant) {
           matchedVariant = findMatchingVariant(
             product,
-            selectedVariant,
+            selectedVariant
           );
         }
 
@@ -274,31 +290,43 @@ export const createOrder = async (req, res) => {
 
       const color = matchedVariant
         ? getVariantColor(matchedVariant)
-        : normalizeValue(selectedVariant.color || item.color);
+        : normalizeValue(
+            selectedVariant.color || item.color
+          );
 
       const ram = matchedVariant
         ? normalizeValue(matchedVariant.ram)
-        : normalizeValue(selectedVariant.ram || item.ram);
+        : normalizeValue(
+            selectedVariant.ram || item.ram
+          );
 
       const storage = matchedVariant
         ? normalizeValue(matchedVariant.storage)
-        : normalizeValue(selectedVariant.storage || item.storage);
+        : normalizeValue(
+            selectedVariant.storage || item.storage
+          );
 
       const currentStock = matchedVariant
         ? Number(matchedVariant.stock ?? 0)
         : Number(product.stock ?? 0);
 
-      if (!Number.isFinite(currentStock) || currentStock < quantity) {
+      if (
+        !Number.isFinite(currentStock) ||
+        currentStock < quantity
+      ) {
         return res.status(400).json({
           success: false,
-          message: `${product.name} has only ${Math.max(0, currentStock || 0)} item(s) in stock`,
+          message: `${product.name} has only ${Math.max(
+            0,
+            currentStock || 0
+          )} item(s) in stock`,
         });
       }
 
       const price = Number(
         matchedVariant
           ? matchedVariant.price
-          : product.discountPrice || product.price,
+          : product.discountPrice || product.price
       );
 
       if (!Number.isFinite(price) || price <= 0) {
@@ -335,7 +363,10 @@ export const createOrder = async (req, res) => {
         name: product.name,
         price,
         quantity,
-         costPrice: Number(product.costPrice ?? 0),
+
+        // Snapshot of product cost at order time
+        costPrice: Number(product.costPrice ?? 0),
+
         color,
         ram,
         storage,
@@ -355,16 +386,23 @@ export const createOrder = async (req, res) => {
       });
     }
 
-    /* CALCULATE SUBTOTAL */
+    /* =========================
+       CALCULATE SUBTOTAL
+    ========================= */
 
     const calculatedSubTotal = orderProducts.reduce(
-      (total, item) => total + item.price * item.quantity,
-      0,
+      (total, item) =>
+        total + item.price * item.quantity,
+      0
     );
 
-    /* DELIVERY CHARGE */
+    /* =========================
+       DELIVERY CHARGE
+    ========================= */
 
-    const requestedDeliveryCharge = Number(deliveryCharge ?? 0);
+    const requestedDeliveryCharge = Number(
+      deliveryCharge ?? 0
+    );
 
     if (
       !Number.isFinite(requestedDeliveryCharge) ||
@@ -376,9 +414,13 @@ export const createOrder = async (req, res) => {
       });
     }
 
-    /* DISCOUNT */
+    /* =========================
+       DISCOUNT
+    ========================= */
 
-    const requestedDiscount = Number(discountAmount ?? 0);
+    const requestedDiscount = Number(
+      discountAmount ?? 0
+    );
 
     if (
       !Number.isFinite(requestedDiscount) ||
@@ -392,28 +434,30 @@ export const createOrder = async (req, res) => {
 
     const safeDiscountAmount = Math.min(
       requestedDiscount,
-      calculatedSubTotal,
+      calculatedSubTotal
     );
 
     const calculatedTotalAmount = Math.max(
       0,
       calculatedSubTotal +
         requestedDeliveryCharge -
-        safeDiscountAmount,
+        safeDiscountAmount
     );
 
-    /* REDUCE STOCK */
+    /* =========================
+       REDUCE STOCK
+    ========================= */
 
     for (const stockItem of stockUpdates) {
       const productId = new mongoose.Types.ObjectId(
-        stockItem.productId,
+        stockItem.productId
       );
 
       const quantity = stockItem.quantity;
 
       if (stockItem.variantId) {
         const variantId = new mongoose.Types.ObjectId(
-          stockItem.variantId,
+          stockItem.variantId
         );
 
         const result = await Product.updateOne(
@@ -437,16 +481,19 @@ export const createOrder = async (req, res) => {
             arrayFilters: [
               {
                 "selectedVariant._id": variantId,
-                "selectedVariant.stock": { $gte: quantity },
+                "selectedVariant.stock": {
+                  $gte: quantity,
+                },
               },
             ],
-          },
+          }
         );
 
         if (result.modifiedCount !== 1) {
           return res.status(409).json({
             success: false,
-            message: "Selected variant stock is no longer available",
+            message:
+              "Selected variant stock is no longer available",
           });
         }
       } else {
@@ -459,77 +506,110 @@ export const createOrder = async (req, res) => {
             $inc: {
               stock: -quantity,
             },
-          },
+          }
         );
 
         if (result.modifiedCount !== 1) {
           return res.status(409).json({
             success: false,
-            message: "Product stock is no longer available",
+            message:
+              "Product stock is no longer available",
           });
         }
       }
     }
 
-    /* CREATE ORDER */
+    /* =========================
+       CREATE NUMERIC ORDER ID
+    ========================= */
 
-    const orderId = `ORD-${Date.now()}`;
+    // Example: 1791903020498
+    // No ORD- prefix
+    const orderId = String(Date.now());
 
     const order = await MainOrder.create({
       orderId,
       customer: customer._id,
+
       customerName: customerName.trim(),
       email: cleanEmail,
       phone: cleanPhone,
       selectArea,
       deliveryAddress: deliveryAddress.trim(),
-      note: typeof note === "string" ? note.trim() : "",
+
+      note:
+        typeof note === "string"
+          ? note.trim()
+          : "",
+
       products: orderProducts,
+
       subTotal: calculatedSubTotal,
       deliveryCharge: requestedDeliveryCharge,
       discountAmount: safeDiscountAmount,
+
       couponCode:
         typeof couponCode === "string"
           ? couponCode.trim().toUpperCase()
           : "",
+
       totalAmount: calculatedTotalAmount,
-      paymentMethod: paymentMethod || "cash_on_delivery",
+
+      paymentMethod:
+        paymentMethod || "cash_on_delivery",
+
       paymentStatus: "unpaid",
-      deliveryMethod: deliveryMethod || "courier_service",
+
+      deliveryMethod:
+        deliveryMethod || "courier_service",
+
       status: "pending",
+
       termsAgreed: true,
+
       source: orderSource || "website",
     });
 
-    // Clear the cached order lists after successful order creation.
+    /* =========================
+       CLEAR ORDER CACHE
+    ========================= */
+
     await clearOrderListCache();
 
-    /* SEND INVOICE EMAIL */
+    /* =========================
+       SEND INVOICE EMAIL
+    ========================= */
 
     let invoiceEmailSent = false;
 
     if (cleanEmail) {
       try {
         await sendInvoiceEmail(order);
+
         invoiceEmailSent = true;
 
         console.log(
           "Invoice email sent successfully:",
           order.orderId,
-          cleanEmail,
+          cleanEmail
         );
       } catch (emailError) {
         console.error(
           "INVOICE EMAIL ERROR:",
           order.orderId,
-          emailError.message,
+          emailError.message
         );
       }
     }
 
+    /* =========================
+       RESPONSE
+    ========================= */
+
     return res.status(201).json({
       success: true,
       message: "Order placed successfully",
+
       data: {
         orderId: order.orderId,
         order,
@@ -542,6 +622,7 @@ export const createOrder = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to create order",
+
       error:
         process.env.NODE_ENV === "development"
           ? error.message
@@ -549,6 +630,7 @@ export const createOrder = async (req, res) => {
     });
   }
 };
+
 
 /* =========================================================
    GET ALL ORDERS

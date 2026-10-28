@@ -49,7 +49,6 @@ role: {
   required: true,
 },
 
-
     isActive: {
       type: Boolean,
       default: true,
@@ -82,6 +81,8 @@ role: {
       type: Date,
       select: false,
     },
+
+
 
     // Pending login OTP expires after 5 minutes
     loginOtpAttempts: {

@@ -88,12 +88,13 @@ const addDeliveryHistory = (
    ASSIGN ORDER
 ===================================================== */
 
+
 export const assignOrder = async (req, res) => {
   try {
-    const { orderId, employeeId } = req.body;
+    const { orderId, employeeId } = req.body || {};
+    const assignedById = getUserId(req);
 
-    const assignedById = req.user?._id || req.user?.id;
-
+    // Validate IDs
     if (!orderId || !employeeId) {
       return res.status(400).json({
         success: false,
@@ -101,45 +102,40 @@ export const assignOrder = async (req, res) => {
       });
     }
 
-    if (!mongoose.isValidObjectId(orderId)) {
+    if (
+      !mongoose.isValidObjectId(orderId) ||
+      !mongoose.isValidObjectId(employeeId)
+    ) {
       return res.status(400).json({
         success: false,
-        message: "Invalid order ID",
+        message: "Invalid order ID or employee ID",
       });
     }
 
-    if (!mongoose.isValidObjectId(employeeId)) {
-      return res.status(400).json({
+    // Find employee and retrieve contact details
+    const employee = await Customer.findOne({
+      _id: employeeId,
+      role: "employee",
+    })
+      .select("_id name fullName username email phone role isActive")
+      .lean();
+
+    if (!employee) {
+      return res.status(404).json({
         success: false,
-        message: "Invalid employee ID",
+        message: "Employee not found",
       });
     }
 
-    const order = await MainOrder.findByIdAndUpdate(
-      orderId,
-      {
-        $set: {
-          assignedEmployee: employeeId,
-          assignedBy: assignedById || null,
-          assignedAt: new Date(),
-          deliveryStatus: "assigned",
-        },
-        $push: {
-          deliveryHistory: {
-            status: "assigned",
-            note: "Order assigned to employee",
-            updatedBy: assignedById || null,
-            updatedAt: new Date(),
-          },
-        },
-      },
-      {
-        new: true,
-        runValidators: true,
-      },
-    )
-      .populate("assignedEmployee", "name fullName username email")
-      .populate("assignedBy", "name fullName username email");
+    if (employee.isActive === false) {
+      return res.status(400).json({
+        success: false,
+        message: "This employee is inactive",
+      });
+    }
+
+    // Find order
+    const order = await MainOrder.findById(orderId);
 
     if (!order) {
       return res.status(404).json({
@@ -147,6 +143,50 @@ export const assignOrder = async (req, res) => {
         message: "Order not found",
       });
     }
+
+    const employeeName =
+      employee.name ||
+      employee.fullName ||
+      employee.username ||
+      "Employee";
+
+    const employeePhone = employee.phone || "Not provided";
+
+    // Store employee assignment
+    order.assignedEmployee = employee._id;
+
+    if (assignedById && mongoose.isValidObjectId(assignedById)) {
+      order.assignedBy = assignedById;
+    }
+
+    order.assignedAt = new Date();
+    order.deliveryStatus = "assigned";
+
+    if (!Array.isArray(order.deliveryHistory)) {
+      order.deliveryHistory = [];
+    }
+
+    // Store name and phone in history note too
+    order.deliveryHistory.push({
+      status: "assigned",
+      note: `Order assigned to employee: ${employeeName} | Phone: ${employeePhone}`,
+      updatedBy: getValidActorId(req),
+      updatedAt: new Date(),
+    });
+
+    await order.save();
+
+    // Return populated employee details
+    await order.populate([
+      {
+        path: "assignedEmployee",
+        select: "name fullName username email phone role",
+      },
+      {
+        path: "assignedBy",
+        select: "name fullName username email role",
+      },
+    ]);
 
     return res.status(200).json({
       success: true,

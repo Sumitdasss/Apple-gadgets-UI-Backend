@@ -150,53 +150,57 @@ const productSchema = new mongoose.Schema(
     // =========================
     // VARIANTS
     // =========================
-
-    variants: [
-      {
-        color: {
-          name: {
-            type: String,
-            default: "",
-          },
-
-          code: {
-            type: String,
-            default: "",
-          },
-
-          image: {
-            type: String,
-            default: "",
-          },
-        },
-
-        ram: {
-          type: String,
-          default: "",
-        },
-
-        storage: {
-          type: String,
-          default: "",
-        },
-
-        stock: {
-          type: Number,
-          default: 0,
-          min: 0,
-        },
-
-        price: {
-          type: Number,
-          min: 0,
-        },
-
-        sku: {
-          type: String,
-          default: "",
-        },
+variants: [
+  {
+    color: {
+      name: {
+        type: String,
+        default: "",
       },
-    ],
+      code: {
+        type: String,
+        default: "",
+      },
+      image: {
+        type: String,
+        default: "",
+      },
+    },
+
+    ram: {
+      type: String,
+      default: "",
+    },
+
+    storage: {
+      type: String,
+      default: "",
+    },
+
+    stock: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+
+    // আগে মিসিং ছিল
+    costPrice: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+
+    price: {
+      type: Number,
+      min: 0,
+    },
+
+    sku: {
+      type: String,
+      default: "",
+    },
+  },
+],
 
     // =========================
     // SIZES

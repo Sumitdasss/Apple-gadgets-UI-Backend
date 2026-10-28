@@ -267,6 +267,12 @@ const normalizeVariants = (variants) =>
       result.price = parseNumber(result.price, "variant price");
     }
 
+    if (result.costPrice !== undefined && result.costPrice !== "") {
+  result.costPrice = parseNumber(result.costPrice, "variant costPrice");
+} else {
+  result.costPrice = 0;
+}
+
     if (result.ram != null) result.ram = cleanString(result.ram);
     if (result.storage != null) {
       result.storage = cleanString(result.storage);

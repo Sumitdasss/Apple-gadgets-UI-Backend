@@ -162,17 +162,6 @@ router.post(
 
 router.get("/cleanup-expired-otps", async (req, res) => {
   try {
-    // Verify cron secret
-    if (
-      !process.env.SECRET ||
-      req.headers.authorization !== `Bearer ${process.env.SECRET}`
-    ) {
-      return res.status(401).json({
-        success: false,
-        message: "Unauthorized",
-      });
-    }
-
     const result = await startOtpCleanup();
 
     return res.status(200).json({

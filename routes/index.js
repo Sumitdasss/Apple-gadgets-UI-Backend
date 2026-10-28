@@ -218,7 +218,6 @@ router.patch(
 
 router.get("/api/cron/cleanup-expired-otps", async (req, res) => {
   try {
-
     if (
       !process.env.CRON_SECRET ||
       req.headers.authorization !==
@@ -230,13 +229,12 @@ router.get("/api/cron/cleanup-expired-otps", async (req, res) => {
       });
     }
 
-
-    const cleaned = await startOtpCleanup();
+    const result = await startOtpCleanup();
 
     return res.status(200).json({
       success: true,
-      message: "Expired registration OTP cleanup completed",
-      cleaned,
+      message: "Expired OTP cleanup completed",
+      ...result,
     });
   } catch (error) {
     console.error("OTP cleanup route error:", error);

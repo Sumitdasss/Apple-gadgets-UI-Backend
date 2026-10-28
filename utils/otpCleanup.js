@@ -4,6 +4,7 @@ import Customer from "../Model/Customer.js";
 export const startOtpCleanup = async () => {
   const now = new Date();
 
+  // Clean expired registration OTPs
   const registrationResult = await Customer.updateMany(
     {
       isEmailVerified: false,
@@ -15,17 +16,37 @@ export const startOtpCleanup = async () => {
       },
     },
     {
-      $unset: {
-        emailOtpHash: 1,
-        emailOtpExpires: 1,
+      $set: {
+        emailOtpHash: null,
+        emailOtpExpires: null,
       },
     }
   );
 
-  const loginResult = await cleanupExpiredLoginOtps();
-
-  return (
-    registrationResult.modifiedCount +
-    loginResult
+  // Clean expired login OTPs
+  const loginResult = await Customer.updateMany(
+    {
+      loginOtpHash: { $exists: true, $ne: null },
+      loginOtpExpires: {
+        $exists: true,
+        $ne: null,
+        $lte: now,
+      },
+    },
+    {
+      $set: {
+        loginOtpHash: null,
+        loginOtpExpires: null,
+        loginOtpAttempts: 0,
+      },
+    }
   );
+
+  return {
+    registrationCleaned: registrationResult.modifiedCount,
+    loginCleaned: loginResult.modifiedCount,
+    totalCleaned:
+      registrationResult.modifiedCount +
+      loginResult.modifiedCount,
+  };
 };

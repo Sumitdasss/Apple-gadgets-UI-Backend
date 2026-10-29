@@ -124,8 +124,7 @@ router.get("/product-costs-report", ...adminAuth, getProductCostsForReport);
 router.get("/products/:id", ...adminAuth, getProductById);
 router.delete("/products/:id", ...adminAuth, deleteProduct);
 // legacy path used by some frontend calls
-router.delete("/:id", ...adminAuth, deleteProduct);
-router.get("/:id", ...adminAuth, getProductById);
+
 
 /* ------------------------------------------------------------------ */
 /* Categories (admin create / banner)                                  */
@@ -175,7 +174,12 @@ router.patch("/:type/:id/banner", ...adminAuth, updateCategoryBanner);
 
 // Admin also needs tree for product forms — keep cache, require auth here
 router.get("/tree", ...adminAuth, categoryCacheMiddleware, getFullCategoryTree);
+router.post( "/main",...adminAuth, upload.fields([ { name: "image", maxCount: 1 }, { name: "bannerImage", maxCount: 1 }, ]), createMainCategory ); 
+// 
 
+router.post( "/sub",...adminAuth, upload.fields([ { name: "image", maxCount: 1 }, { name: "bannerImage", maxCount: 1 }, ]), createSubCategory ); 
+ router.post( "/child",...adminAuth, upload.fields([ { name: "image", maxCount: 1 }, { name: "bannerImage", maxCount: 1 }, ]), createChildCategory ); 
+  router.post( "/sub-child",...adminAuth, upload.fields([ { name: "image", maxCount: 1 }, { name: "bannerImage", maxCount: 1 }, ]), createSubChildCategory );
 /* ------------------------------------------------------------------ */
 /* Orders (admin)                                                      */
 /* ------------------------------------------------------------------ */
@@ -231,5 +235,6 @@ router.get(
 );
 router.post("/assignOrder", ...adminAuth, assignOrder);
 router.patch("/reassignOrder/:orderId", ...adminAuth, reassignOrder);
-
+router.delete("/:id", ...adminAuth, deleteProduct);
+router.get("/:id", ...adminAuth, getProductById);
 export default router;

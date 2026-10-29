@@ -2,7 +2,7 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import DNS from "dns";
-
+import AdminRoute from "./routes/adminRoute.js"
 import  {connectDB}  from "./config/db.js";
 import router from "./routes/index.js";
 import { apiResponse } from "./utils/ApiResponse.js";
@@ -41,7 +41,7 @@ app.use("/api/users", router);
 app.use("/facebook", router);
 app.use("/category", router);
 app.use("/api/orders",  router);
-app.use("/api/dashboard", router);
+app.use("/api/dashboard", AdminRoute);
 app.use("/api/customers", router);
 app.use("/api/landing-pages", router);
 app.use("/api/payment/sslcommerz", router);

@@ -419,65 +419,52 @@ export const verifyAdminLoginOtp = asyncHandler(
 // Requires verifyToken + authorizeRoles
 // ========================================
 
-export const getAdminProfile = asyncHandler(
-  async (req, res) => {
-    if (!req.user) {
-      return apiResponse(
-        res,
-        401,
-        "Authentication required"
-      );
-    }
 
-    // JWT payload থেকে admin ID নেওয়া
-    const adminId =
-      req.user.id ||
-      req.user._id ||
-      req.user.userId;
-
-    if (!adminId) {
-      return apiResponse(
-        res,
-        401,
-        "Admin ID missing from token"
-      );
-    }
-
-    // Database থেকে সম্পূর্ণ admin profile আনা
-    const admin = await Customer.findById(adminId);
-
-    if (!admin) {
-      return apiResponse(
-        res,
-        404,
-        "Admin account not found"
-      );
-    }
-
-    // Database-এর প্রকৃত role যাচাই
-    if (!ADMIN_ROLES.includes(admin.role)) {
-      return apiResponse(
-        res,
-        403,
-        "Admin access denied"
-      );
-    }
-
-    if (admin.isActive === false) {
-      return apiResponse(
-        res,
-        403,
-        "Admin account is inactive"
-      );
-    }
-
-    return apiResponse(
-      res,
-      200,
-      "Admin profile fetched successfully",
-      {
-        user: sanitizeAdmin(admin),
-      }
-    );
+export const getAdminProfile = asyncHandler(async (req, res) => {
+  if (!req.user) {
+    return apiResponse(res, 401, "Authentication required");
   }
-);
+
+  const adminId =
+    req.user.id ||
+    req.user._id ||
+    req.user.userId;
+
+  if (!adminId) {
+    return apiResponse(res, 401, "Admin ID missing from token");
+  }
+
+  const admin = await Customer.findById(adminId).select(
+    "name fullName username email role isActive"
+  );
+
+  if (!admin) {
+    return apiResponse(res, 404, "Admin account not found");
+  }
+
+  if (!ADMIN_ROLES.includes(admin.role)) {
+    return apiResponse(res, 403, "Admin access denied");
+  }
+
+  if (admin.isActive === false) {
+    return apiResponse(res, 403, "Admin account is inactive");
+  }
+
+  return apiResponse(
+    res,
+    200,
+    "Admin profile fetched successfully",
+    {
+      user: {
+        id: admin._id,
+        name:
+          admin.name ||
+          admin.fullName ||
+          admin.username ||
+          "",
+        email: admin.email || "",
+        role: admin.role,
+      },
+    }
+  );
+});

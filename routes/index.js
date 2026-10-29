@@ -40,6 +40,7 @@ import { assignOrder, getEmployeeReportById, getEmployeeReportSummary, getEmploy
  import { initiateSSLCommerzPayment, sslcommerzCancel, sslcommerzFail, sslcommerzIPN, sslcommerzSuccess } from "../Controller/sslcommerzController.js";
 import { getCustomerOrdersByPhone, getMyOrderTracking, getOrderTracking } from "../Controller/OrderTrackingController.js";
 import { startOtpCleanup } from "../utils/otpCleanup.js";
+import { adminLogin, getAdminProfile, verifyAdminLoginOtp } from "../Controller/AdminAuthController.js";
 const router = express.Router();
 
 router.post(
@@ -240,7 +241,14 @@ router.patch(
 );
 
 
-
+router.post("/Admin-login", adminLogin);
+router.post("/Admin-verify-otp", verifyAdminLoginOtp);
+router.get(
+  "/Admin-me",
+  verifyToken,
+  authorizeRoles("admin", "subadmin","order_manager"),
+  getAdminProfile
+);
 
 
 

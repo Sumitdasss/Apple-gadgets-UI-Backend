@@ -429,11 +429,45 @@ export const getAdminProfile = asyncHandler(
       );
     }
 
-    if (!ADMIN_ROLES.includes(req.user.role)) {
+    // JWT payload থেকে admin ID নেওয়া
+    const adminId =
+      req.user.id ||
+      req.user._id ||
+      req.user.userId;
+
+    if (!adminId) {
+      return apiResponse(
+        res,
+        401,
+        "Admin ID missing from token"
+      );
+    }
+
+    // Database থেকে সম্পূর্ণ admin profile আনা
+    const admin = await Customer.findById(adminId);
+
+    if (!admin) {
+      return apiResponse(
+        res,
+        404,
+        "Admin account not found"
+      );
+    }
+
+    // Database-এর প্রকৃত role যাচাই
+    if (!ADMIN_ROLES.includes(admin.role)) {
       return apiResponse(
         res,
         403,
         "Admin access denied"
+      );
+    }
+
+    if (admin.isActive === false) {
+      return apiResponse(
+        res,
+        403,
+        "Admin account is inactive"
       );
     }
 
@@ -442,7 +476,7 @@ export const getAdminProfile = asyncHandler(
       200,
       "Admin profile fetched successfully",
       {
-        user: sanitizeAdmin(req.user),
+        user: sanitizeAdmin(admin),
       }
     );
   }

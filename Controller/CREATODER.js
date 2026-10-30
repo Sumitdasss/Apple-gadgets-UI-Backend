@@ -118,10 +118,7 @@ export const createOrder = async (req, res) => {
        BASIC VALIDATION
     ========================= */
 
-    if (
-      typeof customerName !== "string" ||
-      !customerName.trim()
-    ) {
+    if (typeof customerName !== "string" || !customerName.trim()) {
       return res.status(400).json({
         success: false,
         message: "Customer name is required",
@@ -142,10 +139,7 @@ export const createOrder = async (req, res) => {
       });
     }
 
-    if (
-      typeof deliveryAddress !== "string" ||
-      !deliveryAddress.trim()
-    ) {
+    if (typeof deliveryAddress !== "string" || !deliveryAddress.trim()) {
       return res.status(400).json({
         success: false,
         message: "Delivery address is required",
@@ -169,9 +163,37 @@ export const createOrder = async (req, res) => {
     const cleanPhone = phone.trim();
 
     const cleanEmail =
-      typeof email === "string"
-        ? email.trim().toLowerCase()
-        : "";
+      typeof email === "string" ? email.trim().toLowerCase() : "";
+
+    /* =========================
+       CAPTURE CLIENT IP
+    ========================= */
+
+    const getClientIp = (req) => {
+      const forwarded = req.headers["x-forwarded-for"];
+      if (forwarded) {
+        return String(forwarded).split(",")[0].trim();
+      }
+
+      if (req.headers["x-real-ip"]) {
+        return String(req.headers["x-real-ip"]).trim();
+      }
+
+      if (req.headers["cf-connecting-ip"]) {
+        return String(req.headers["cf-connecting-ip"]).trim();
+      }
+
+      const ip =
+        req.ip ||
+        req.socket?.remoteAddress ||
+        req.connection?.remoteAddress ||
+        "";
+
+      return String(ip).replace(/^::ffff:/, "");
+    };
+
+    const clientIp = getClientIp(req);
+    const userAgent = req.headers["user-agent"] || "";
 
     /* =========================
        FIND OR CREATE CUSTOMER
@@ -210,15 +232,9 @@ export const createOrder = async (req, res) => {
 
     for (const item of products) {
       const productId =
-        item.productId ||
-        item.product ||
-        item._id ||
-        item.id;
+        item.productId || item.product || item._id || item.id;
 
-      if (
-        !productId ||
-        !mongoose.Types.ObjectId.isValid(String(productId))
-      ) {
+      if (!productId || !mongoose.Types.ObjectId.isValid(String(productId))) {
         return res.status(400).json({
           success: false,
           message: "Missing or invalid product ID",
@@ -230,9 +246,7 @@ export const createOrder = async (req, res) => {
       if (!product) {
         return res.status(404).json({
           success: false,
-          message: `Product not found: ${
-            item.name || "Unknown product"
-          }`,
+          message: `Product not found: ${item.name || "Unknown product"}`,
         });
       }
 
@@ -255,29 +269,20 @@ export const createOrder = async (req, res) => {
 
       let matchedVariant = null;
 
-      if (
-        Array.isArray(product.variants) &&
-        product.variants.length > 0
-      ) {
-        const selectedVariantId = normalizeValue(
-          selectedVariant.variantId
-        );
+      if (Array.isArray(product.variants) && product.variants.length > 0) {
+        const selectedVariantId = normalizeValue(selectedVariant.variantId);
 
         if (
           selectedVariantId &&
           mongoose.Types.ObjectId.isValid(selectedVariantId)
         ) {
           matchedVariant = product.variants.find(
-            (variant) =>
-              String(variant._id) === selectedVariantId
+            (variant) => String(variant._id) === selectedVariantId
           );
         }
 
         if (!matchedVariant) {
-          matchedVariant = findMatchingVariant(
-            product,
-            selectedVariant
-          );
+          matchedVariant = findMatchingVariant(product, selectedVariant);
         }
 
         if (!matchedVariant) {
@@ -290,30 +295,21 @@ export const createOrder = async (req, res) => {
 
       const color = matchedVariant
         ? getVariantColor(matchedVariant)
-        : normalizeValue(
-            selectedVariant.color || item.color
-          );
+        : normalizeValue(selectedVariant.color || item.color);
 
       const ram = matchedVariant
         ? normalizeValue(matchedVariant.ram)
-        : normalizeValue(
-            selectedVariant.ram || item.ram
-          );
+        : normalizeValue(selectedVariant.ram || item.ram);
 
       const storage = matchedVariant
         ? normalizeValue(matchedVariant.storage)
-        : normalizeValue(
-            selectedVariant.storage || item.storage
-          );
+        : normalizeValue(selectedVariant.storage || item.storage);
 
       const currentStock = matchedVariant
         ? Number(matchedVariant.stock ?? 0)
         : Number(product.stock ?? 0);
 
-      if (
-        !Number.isFinite(currentStock) ||
-        currentStock < quantity
-      ) {
+      if (!Number.isFinite(currentStock) || currentStock < quantity) {
         return res.status(400).json({
           success: false,
           message: `${product.name} has only ${Math.max(
@@ -350,9 +346,7 @@ export const createOrder = async (req, res) => {
         image = product.images[0] || "";
       }
 
-      const variantId = matchedVariant
-        ? getVariantId(matchedVariant)
-        : null;
+      const variantId = matchedVariant ? getVariantId(matchedVariant) : null;
 
       const sku = matchedVariant
         ? normalizeValue(matchedVariant.sku)
@@ -363,10 +357,7 @@ export const createOrder = async (req, res) => {
         name: product.name,
         price,
         quantity,
-
-        // Snapshot of product cost at order time
         costPrice: Number(product.costPrice ?? 0),
-
         color,
         ram,
         storage,
@@ -379,9 +370,7 @@ export const createOrder = async (req, res) => {
 
       stockUpdates.push({
         productId: String(product._id),
-        variantId: matchedVariant
-          ? String(matchedVariant._id)
-          : null,
+        variantId: matchedVariant ? String(matchedVariant._id) : null,
         quantity,
       });
     }
@@ -391,8 +380,7 @@ export const createOrder = async (req, res) => {
     ========================= */
 
     const calculatedSubTotal = orderProducts.reduce(
-      (total, item) =>
-        total + item.price * item.quantity,
+      (total, item) => total + item.price * item.quantity,
       0
     );
 
@@ -400,14 +388,9 @@ export const createOrder = async (req, res) => {
        DELIVERY CHARGE
     ========================= */
 
-    const requestedDeliveryCharge = Number(
-      deliveryCharge ?? 0
-    );
+    const requestedDeliveryCharge = Number(deliveryCharge ?? 0);
 
-    if (
-      !Number.isFinite(requestedDeliveryCharge) ||
-      requestedDeliveryCharge < 0
-    ) {
+    if (!Number.isFinite(requestedDeliveryCharge) || requestedDeliveryCharge < 0) {
       return res.status(400).json({
         success: false,
         message: "Invalid delivery charge",
@@ -418,30 +401,20 @@ export const createOrder = async (req, res) => {
        DISCOUNT
     ========================= */
 
-    const requestedDiscount = Number(
-      discountAmount ?? 0
-    );
+    const requestedDiscount = Number(discountAmount ?? 0);
 
-    if (
-      !Number.isFinite(requestedDiscount) ||
-      requestedDiscount < 0
-    ) {
+    if (!Number.isFinite(requestedDiscount) || requestedDiscount < 0) {
       return res.status(400).json({
         success: false,
         message: "Invalid discount amount",
       });
     }
 
-    const safeDiscountAmount = Math.min(
-      requestedDiscount,
-      calculatedSubTotal
-    );
+    const safeDiscountAmount = Math.min(requestedDiscount, calculatedSubTotal);
 
     const calculatedTotalAmount = Math.max(
       0,
-      calculatedSubTotal +
-        requestedDeliveryCharge -
-        safeDiscountAmount
+      calculatedSubTotal + requestedDeliveryCharge - safeDiscountAmount
     );
 
     /* =========================
@@ -449,16 +422,11 @@ export const createOrder = async (req, res) => {
     ========================= */
 
     for (const stockItem of stockUpdates) {
-      const productId = new mongoose.Types.ObjectId(
-        stockItem.productId
-      );
-
+      const productId = new mongoose.Types.ObjectId(stockItem.productId);
       const quantity = stockItem.quantity;
 
       if (stockItem.variantId) {
-        const variantId = new mongoose.Types.ObjectId(
-          stockItem.variantId
-        );
+        const variantId = new mongoose.Types.ObjectId(stockItem.variantId);
 
         const result = await Product.updateOne(
           {
@@ -481,9 +449,7 @@ export const createOrder = async (req, res) => {
             arrayFilters: [
               {
                 "selectedVariant._id": variantId,
-                "selectedVariant.stock": {
-                  $gte: quantity,
-                },
+                "selectedVariant.stock": { $gte: quantity },
               },
             ],
           }
@@ -492,8 +458,7 @@ export const createOrder = async (req, res) => {
         if (result.modifiedCount !== 1) {
           return res.status(409).json({
             success: false,
-            message:
-              "Selected variant stock is no longer available",
+            message: "Selected variant stock is no longer available",
           });
         }
       } else {
@@ -512,8 +477,7 @@ export const createOrder = async (req, res) => {
         if (result.modifiedCount !== 1) {
           return res.status(409).json({
             success: false,
-            message:
-              "Product stock is no longer available",
+            message: "Product stock is no longer available",
           });
         }
       }
@@ -523,8 +487,6 @@ export const createOrder = async (req, res) => {
        CREATE NUMERIC ORDER ID
     ========================= */
 
-    // Example: 1791903020498
-    // No ORD- prefix
     const orderId = String(Date.now());
 
     const order = await MainOrder.create({
@@ -537,10 +499,7 @@ export const createOrder = async (req, res) => {
       selectArea,
       deliveryAddress: deliveryAddress.trim(),
 
-      note:
-        typeof note === "string"
-          ? note.trim()
-          : "",
+      note: typeof note === "string" ? note.trim() : "",
 
       products: orderProducts,
 
@@ -555,19 +514,16 @@ export const createOrder = async (req, res) => {
 
       totalAmount: calculatedTotalAmount,
 
-      paymentMethod:
-        paymentMethod || "cash_on_delivery",
-
+      paymentMethod: paymentMethod || "cash_on_delivery",
       paymentStatus: "unpaid",
-
-      deliveryMethod:
-        deliveryMethod || "courier_service",
-
+      deliveryMethod: deliveryMethod || "courier_service",
       status: "pending",
-
       termsAgreed: true,
-
       source: orderSource || "website",
+
+      // IP & User Agent
+      ipAddress: clientIp,
+      userAgent: userAgent,
     });
 
     /* =========================
@@ -585,7 +541,6 @@ export const createOrder = async (req, res) => {
     if (cleanEmail) {
       try {
         await sendInvoiceEmail(order);
-
         invoiceEmailSent = true;
 
         console.log(
@@ -609,7 +564,6 @@ export const createOrder = async (req, res) => {
     return res.status(201).json({
       success: true,
       message: "Order placed successfully",
-
       data: {
         orderId: order.orderId,
         order,
@@ -622,11 +576,8 @@ export const createOrder = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to create order",
-
       error:
-        process.env.NODE_ENV === "development"
-          ? error.message
-          : undefined,
+        process.env.NODE_ENV === "development" ? error.message : undefined,
     });
   }
 };

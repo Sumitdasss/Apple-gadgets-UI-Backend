@@ -58,6 +58,15 @@ const orderSchema = new mongoose.Schema(
       trim: true,
     },
 
+    ipAddress: {
+  type: String,
+  default: "",
+  trim: true,
+},
+userAgent: {
+  type: String,
+  default: "",
+},
     // =========================
     // ORDERED PRODUCTS
     // =========================

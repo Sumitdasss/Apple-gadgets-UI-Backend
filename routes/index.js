@@ -41,6 +41,7 @@ import { assignOrder, getEmployeeReportById, getEmployeeReportSummary, getEmploy
 import { getCustomerOrdersByPhone, getMyOrderTracking, getOrderTracking } from "../Controller/OrderTrackingController.js";
 import { startOtpCleanup } from "../utils/otpCleanup.js";
 import { adminLogin, getAdminProfile, verifyAdminLoginOtp } from "../Controller/AdminAuthController.js";
+import { forgotPassword, resetPassword, verifyResetOtp } from "../Controller/Passwordcontroller.js";
 const router = express.Router();
 
 router.post(
@@ -126,7 +127,13 @@ router.put(
   updateProduct,
 );
 router.get("/:orderId/navigation", getOrderNavigation);
-
+router.post("/forgot-password", forgotPassword);
+ 
+// POST /api/users/verify-reset-otp  { email, otp }
+router.post("/verify-reset-otp", verifyResetOtp);
+ 
+// POST /api/users/reset-password    { email, resetToken, newPassword }
+router.post("/reset-password", resetPassword);
 // GET /api/orders/:orderId
 
 router.get("/AllCustomers", getAllCustomers);

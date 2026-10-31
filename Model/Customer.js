@@ -1,4 +1,3 @@
-
 import mongoose from "mongoose";
 
 const customerSchema = new mongoose.Schema(
@@ -35,19 +34,18 @@ const customerSchema = new mongoose.Schema(
       trim: true,
     },
 
-   
-role: {
-  type: String,
-  enum: [
-    "customer",
-    "admin",
-    "subadmin",
-    "employee",
-    "order_manager",
-  ],
-  default: "customer",
-  required: true,
-},
+    role: {
+      type: String,
+      enum: [
+        "customer",
+        "admin",
+        "subadmin",
+        "employee",
+        "order_manager",
+      ],
+      default: "customer",
+      required: true,
+    },
 
     isActive: {
       type: Boolean,
@@ -82,12 +80,54 @@ role: {
       select: false,
     },
 
-
-
     // Pending login OTP expires after 5 minutes
     loginOtpAttempts: {
       type: Number,
       default: 0,
+      select: false,
+    },
+
+    // =====================================================
+    // FORGOT PASSWORD
+    // Step 1: reset OTP (emailed)
+    // Step 2: one-time reset token (issued after OTP is verified)
+    // =====================================================
+    resetOtpHash: {
+      type: String,
+      select: false,
+    },
+
+    resetOtpExpires: {
+      type: Date,
+      select: false,
+    },
+
+    resetOtpAttempts: {
+      type: Number,
+      default: 0,
+      select: false,
+    },
+
+    // Used for the resend cooldown
+    resetOtpSentAt: {
+      type: Date,
+      select: false,
+    },
+
+    // SHA-256 hash of the one-time reset token
+    resetTokenHash: {
+      type: String,
+      select: false,
+    },
+
+    resetTokenExpires: {
+      type: Date,
+      select: false,
+    },
+
+    // Set when the password changes (use it to invalidate old JWTs)
+    passwordChangedAt: {
+      type: Date,
       select: false,
     },
   },

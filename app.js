@@ -7,7 +7,7 @@ import  {connectDB}  from "./config/db.js";
 import router from "./routes/index.js";
 import { apiResponse } from "./utils/ApiResponse.js";
 import cookieParser from "cookie-parser";
-
+import { startOtpCleanupCron } from "./utils/otpCron.js";
 
 DNS.setServers(["1.1.1.1", "8.8.8.8"]);
 
@@ -58,4 +58,10 @@ app.use((err, req, res, next) => {
 apiResponse(res, statusCode, err.message || "Internal server error", null);
 
 });
+
+if (process.env.ENABLE_OTP_CRON === "true") {
+  startOtpCleanupCron();
+}
+
+
 export default app;
